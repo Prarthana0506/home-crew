@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   Coins, Zap, Calendar as CalendarIcon, CheckCircle, XCircle, AlertCircle,
-  MessageSquare, Star, ShieldCheck, MapPin, Award, Send, Filter, Briefcase, Check,
-  Heart, Bookmark, MoreHorizontal, Share2
+  MessageSquare, Star, ShieldCheck, MapPin, Award, Send, Briefcase, Check,
+  Heart, Bookmark, MoreHorizontal
 } from 'lucide-react';
 
 export const ProviderDashboard: React.FC = () => {

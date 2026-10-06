@@ -283,7 +283,7 @@ export const CustomerDashboard: React.FC = () => {
             </div>
 
             <button type="submit" disabled={submitting} className="btn-flat btn-flat-red" style={{ width: '100%', padding: '13px', fontSize: '0.98rem' }}>
-              {serviceType === 'emergency' ? <><Zap size={18} /> Broadcast Emergency (₹{finalPrice})</> : <><CheckCircle size={18} /> Post Ordinary Listing (₹{basePrice})</>}
+              {serviceType === 'emergency' ? <><Zap size={18} /> Broadcast Emergency (₹{minPrice})</> : <><CheckCircle size={18} /> Post Ordinary Listing (₹{basePrice})</>}
             </button>
           </form>
         </div>
