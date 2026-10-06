@@ -7,7 +7,11 @@
     "dev": "concurrently \"tsx watch server/index.ts\" \"vite\"",
     "server": "tsx watch server/index.ts",
     "client": "vite",
+<<<<<<< HEAD
     "build": "vite build",
+=======
+    "build": "tsc -b && vite build",
+>>>>>>> 3f0ddc8504c32bb75b93f400e52f63d435129101
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -34,4 +38,8 @@
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 3f0ddc8504c32bb75b93f400e52f63d435129101
