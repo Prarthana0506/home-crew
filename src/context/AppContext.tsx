@@ -26,6 +26,8 @@ interface AppContextType {
   closeChat: () => void;
   sendChatMessage: (requestId: string, message: string, attachment_url?: string) => Promise<any>;
   triggerAdminBidding: (requestId: string) => Promise<any>;
+  currentView: 'main' | 'privacy' | 'terms';
+  navigateToView: (view: 'main' | 'privacy' | 'terms') => void;
   openCompulsoryReview: (requestId: string) => void;
   closeCompulsoryReview: () => void;
 }
@@ -73,6 +75,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
   const [compulsoryReviewRequestId, setCompulsoryReviewRequestId] = useState<string | null>(null);
 
+  const [currentView, setCurrentView] = useState<'main' | 'privacy' | 'terms'>(() => {
+    const hash = typeof window !== 'undefined' ? window.location.hash.toLowerCase() : '';
+    if (hash.includes('privacy')) return 'privacy';
+    if (hash.includes('terms')) return 'terms';
+    return 'main';
+  });
+
+  const navigateToView = (view: 'main' | 'privacy' | 'terms') => {
+    setCurrentView(view);
+    if (typeof window !== 'undefined') {
+      if (view === 'privacy') window.location.hash = '/privacy';
+      else if (view === 'terms') window.location.hash = '/terms';
+      else if (window.location.hash.includes('privacy') || window.location.hash.includes('terms')) {
+        window.location.hash = '';
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash.toLowerCase();
+      if (hash.includes('privacy')) setCurrentView('privacy');
+      else if (hash.includes('terms')) setCurrentView('terms');
+      else setCurrentView('main');
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
   // Fetch initial data
   const loadInitialData = async () => {
     setLoading(true);
@@ -85,13 +116,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (catData) setCategories(catData);
       if (userData) setUsers(userData);
 
-      // Auto login saved session or default first customer if authenticated
+      // Auto login saved session
       const savedUser = localStorage.getItem('urbanclap_user');
       if (savedUser) {
         try {
           const parsed = JSON.parse(savedUser);
-          setCurrentUser(parsed);
-          setActiveRole(parsed.role || 'customer');
+          const freshUser = userData?.find((u: any) => u.id === parsed.id) || parsed;
+          setCurrentUser(freshUser);
+          const initialRole = freshUser.role === 'provider' ? 'provider' : (freshUser.role === 'admin' ? 'admin' : 'customer');
+          setActiveRole(initialRole);
           setIsAuthenticated(true);
         } catch {
           localStorage.removeItem('urbanclap_user');
@@ -128,7 +161,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setCurrentUser(data.user);
-    setActiveRole(data.user.role || 'customer');
+    const initialRole = data.user.role === 'provider' ? 'provider' : (data.user.role === 'admin' ? 'admin' : 'customer');
+    setActiveRole(initialRole);
     setIsAuthenticated(true);
     localStorage.setItem('urbanclap_user', JSON.stringify(data.user));
     return data.user;
@@ -142,7 +176,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     setCurrentUser(data.user);
-    setActiveRole(data.user.role || 'customer');
+    const initialRole = data.user.role === 'provider' ? 'provider' : (data.user.role === 'admin' ? 'admin' : 'customer');
+    setActiveRole(initialRole);
     setIsAuthenticated(true);
     localStorage.setItem('urbanclap_user', JSON.stringify(data.user));
 
@@ -162,14 +197,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const switchRole = (role: 'customer' | 'provider' | 'admin', _userId?: string) => {
-    // Same user, just change which dashboard view is active
-    setActiveRole(role);
-    // Update the user's role in state and storage for the active session view
-    if (currentUser) {
-      const updatedUser = { ...currentUser, role };
-      setCurrentUser(updatedUser);
-      localStorage.setItem('urbanclap_user', JSON.stringify(updatedUser));
+    // Single-role accounts ('customer' or 'provider') can never switch roles
+    if (currentUser?.role !== 'both' && currentUser?.role !== 'admin') {
+      console.warn('Role switching is disabled for single-role accounts.');
+      return;
     }
+    setActiveRole(role);
   };
 
 
@@ -324,6 +357,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         closeChat,
         sendChatMessage,
         triggerAdminBidding,
+        currentView,
+        navigateToView,
         openCompulsoryReview,
         closeCompulsoryReview
       }}

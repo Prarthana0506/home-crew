@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import type { ServiceType, ProviderPreference } from '../types';
 import {
   PlusCircle, Calendar as CalendarIcon, Clock, MessageSquare,
-  CheckCircle, Star, Image as ImageIcon, MapPin, Zap, Phone
+  CheckCircle, Star, Image as ImageIcon, MapPin, Zap, Phone, Wrench
 } from 'lucide-react';
 
 export const CustomerDashboard: React.FC = () => {
@@ -130,7 +130,7 @@ export const CustomerDashboard: React.FC = () => {
           {errorMsg && <div style={{ background: 'var(--color-coral-light)', color: 'var(--color-terracotta-dark)', padding: '11px 14px', borderRadius: '8px', border: '2px solid var(--color-terracotta)', marginBottom: '16px', fontWeight: 700, fontSize: '0.88rem' }}>{errorMsg}</div>}
 
           <form onSubmit={handleSubmitRequest} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            {/* Category Grid — always uses auto-fit so it stacks cleanly */}
+            {/* Category Grid: always uses auto-fit so it stacks cleanly */}
             <div>
               <label style={{ display: 'block', fontWeight: 700, marginBottom: '8px', fontSize: '0.9rem' }}>Select Service Category</label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' }}>
@@ -172,7 +172,7 @@ export const CustomerDashboard: React.FC = () => {
                 ))}
               </div>
 
-              {/* Dynamic Price Adjustment — Cannot go below minPrice, but can go above it */}
+              {/* Dynamic Price Adjustment: Cannot go below minPrice, but can go above it */}
               <div style={{ backgroundColor: '#ffffff', padding: '14px', borderRadius: '8px', border: '1.5px solid var(--color-teal-dark)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
                   <div>
@@ -212,13 +212,13 @@ export const CustomerDashboard: React.FC = () => {
 
                 {/* Material Fee Clarification Notice */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '0.76rem', fontWeight: 700, color: 'var(--color-teal-dark)', background: '#f8fafc', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
-                  <span>🛠️</span>
-                  <span><strong>Important Notice:</strong> This amount is purely the provider's <strong>service & labor charge</strong>. Material/spare part costs are not included and are payable separately.</span>
+                  <Wrench size={14} color="var(--color-teal-dark)" />
+                  <span><strong>Important Notice:</strong> This amount is purely the provider's <strong>service &amp; labor charge</strong>. Material and spare part costs are not included and are payable separately.</span>
                 </div>
               </div>
             </div>
 
-            {/* Fields row — 2-col on desktop, 1-col mobile via auto-fit */}
+            {/* Fields row: 2-col on desktop, 1-col mobile via auto-fit */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
               <div>
                 <label style={{ display: 'block', fontWeight: 700, marginBottom: '5px', fontSize: '0.88rem' }}>Service Title *</label>
@@ -276,8 +276,8 @@ export const CustomerDashboard: React.FC = () => {
                 />
                 <span style={{ fontSize: '0.74rem', color: serviceType === 'ordinary' ? 'var(--color-terracotta)' : 'var(--color-muted)', marginTop: '4px', display: 'block', fontWeight: 600 }}>
                   {serviceType === 'emergency'
-                    ? '⚡ Emergency: Available for Today & Tomorrow'
-                    : `📅 Ordinary: Earliest available date starts from ${minOrdinaryDate} (Today & Tomorrow are greyed out)`}
+                    ? 'Emergency Priority: Available for Today and Tomorrow'
+                    : `Standard Listing: Earliest available date starts from ${minOrdinaryDate} (Today and Tomorrow are reserved for emergency dispatch)`}
                 </span>
               </div>
             </div>
@@ -371,15 +371,15 @@ export const CustomerDashboard: React.FC = () => {
                   <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
                     <div style={{ flex: '1 1 220px' }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-                        <span className="flat-badge badge-ordinary">📅 Date: {req.scheduled_date}</span>
+                        <span className="flat-badge badge-ordinary">Date: {req.scheduled_date}</span>
                         {req.service_type === 'emergency' ? (
-                          <span className="flat-badge badge-emergency">⚡ Emergency</span>
+                          <span className="flat-badge badge-emergency">Emergency</span>
                         ) : (
-                          <span className="flat-badge badge-ordinary">🔧 Ordinary</span>
+                          <span className="flat-badge badge-ordinary">Standard</span>
                         )}
                         <span className="flat-badge badge-coins">₹{req.final_price || req.base_price}</span>
                         <span className="flat-badge" style={{ background: req.status === 'assigned' ? '#dcfce7' : req.status === 'in_progress' ? '#fef3c7' : '#e0f2fe', color: 'var(--color-teal-dark)', border: '1.5px solid var(--color-teal-dark)' }}>
-                          Status: {req.status === 'bidding_active' ? '🟢 Bidding Active' : req.status === 'assigned' ? '🛠️ Assigned' : req.status === 'in_progress' ? '⏳ In Progress' : req.status}
+                          Status: {req.status === 'bidding_active' ? 'Bidding Active' : req.status === 'assigned' ? 'Assigned' : req.status === 'in_progress' ? 'In Progress' : req.status}
                         </span>
                       </div>
                       <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-teal-dark)' }}>{req.title}</h4>
@@ -427,19 +427,19 @@ export const CustomerDashboard: React.FC = () => {
                   <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
                     <div style={{ flex: '1 1 200px' }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px' }}>
-                        <span className="flat-badge badge-ordinary">🗓️ Posted: {new Date(req.created_at || Date.now()).toLocaleDateString()}</span>
-                        <span className="flat-badge badge-ordinary">📅 Scheduled: {req.scheduled_date}</span>
+                        <span className="flat-badge badge-ordinary">Posted: {new Date(req.created_at || Date.now()).toLocaleDateString()}</span>
+                        <span className="flat-badge badge-ordinary">Scheduled: {req.scheduled_date}</span>
                         {req.service_type === 'emergency' ? (
-                          <span className="flat-badge badge-emergency">⚡ Emergency</span>
+                          <span className="flat-badge badge-emergency">Emergency</span>
                         ) : (
-                          <span className="flat-badge badge-ordinary">🔧 Ordinary</span>
+                          <span className="flat-badge badge-ordinary">Standard</span>
                         )}
                         <span className="flat-badge badge-coins">₹{req.final_price || req.base_price}</span>
                         <span className="flat-badge" style={{
                           background: req.status === 'completed' ? '#22c55e' : req.status === 'cancelled' ? 'var(--color-terracotta)' : 'var(--color-gold)',
                           color: '#fff', border: 'none'
                         }}>
-                          {req.status === 'completed' ? '✅ Completed' : req.status === 'cancelled' ? '❌ Cancelled' : `📋 Status: ${req.status}`}
+                          {req.status === 'completed' ? 'Completed' : req.status === 'cancelled' ? 'Cancelled' : `Status: ${req.status}`}
                         </span>
                       </div>
                       <h4 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-teal-dark)' }}>{req.title}</h4>

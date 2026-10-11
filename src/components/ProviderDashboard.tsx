@@ -263,20 +263,20 @@ export const ProviderDashboard: React.FC = () => {
               <button
                 onClick={() => setSelectedCategory('all')}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '20px',
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '6px',
                   border: `2px solid ${selectedCategory === 'all' ? 'var(--color-terracotta)' : '#cbd5e1'}`,
                   background: selectedCategory === 'all' ? 'var(--color-coral-light)' : '#f8fafc',
                   fontWeight: 800, fontSize: '0.8rem', cursor: 'pointer', flexShrink: 0
                 }}
               >
-                <span>🔥</span> All Work Listings ({requests.filter(r => r.service_type === 'ordinary' && r.status === 'bidding_active').length})
+                All Work Listings ({requests.filter(r => r.service_type === 'ordinary' && r.status === 'bidding_active').length})
               </button>
               {categories.map(c => (
                 <button
                   key={c.id}
                   onClick={() => setSelectedCategory(c.id)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '20px',
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '6px',
                     border: `2px solid ${selectedCategory === c.id ? 'var(--color-terracotta)' : '#cbd5e1'}`,
                     background: selectedCategory === c.id ? 'var(--color-coral-light)' : '#f8fafc',
                     fontWeight: selectedCategory === c.id ? 800 : 600, fontSize: '0.8rem', cursor: 'pointer', flexShrink: 0
@@ -288,9 +288,9 @@ export const ProviderDashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Instagram Feed Cards */}
+          {/* Service Feed Cards */}
           {openOrdinaryRequests.length === 0 ? (
-            <div className="flat-card" style={{ textAlign: 'center', padding: '40px', color: 'var(--color-muted)', borderRadius: '16px' }}>
+            <div className="flat-card" style={{ textAlign: 'center', padding: '40px', color: 'var(--color-muted)', borderRadius: '8px' }}>
               No available service job postings in this feed right now.
             </div>
           ) : (
@@ -303,22 +303,22 @@ export const ProviderDashboard: React.FC = () => {
               return (
                 <div key={req.id} className="flat-card" style={{
                   backgroundColor: '#ffffff',
-                  borderRadius: '16px',
+                  borderRadius: '8px',
                   padding: '0',
                   overflow: 'hidden',
                   border: '2px solid var(--color-teal-dark)',
                   boxShadow: '0 4px 16px rgba(0,0,0,0.06)'
                 }}>
-                  {/* 1. Instagram Post Header */}
+                  {/* 1. Post Header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #f1f5f9' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <div style={{
-                        padding: '2px', background: 'linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888)', borderRadius: '50%'
+                        padding: '2px', background: 'var(--color-teal-mid)', borderRadius: '6px'
                       }}>
                         <img
                           src={customerObj?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
                           alt={req.customer_name}
-                          style={{ width: '38px', height: '38px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #fff' }}
+                          style={{ width: '38px', height: '38px', borderRadius: '4px', objectFit: 'cover', border: '1.5px solid #fff' }}
                         />
                       </div>
                       <div>
@@ -336,7 +336,7 @@ export const ProviderDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 2. Instagram Image / Media Section with Price Overlay */}
+                  {/* 2. Media Section with Price Overlay */}
                   <div style={{ position: 'relative', width: '100%', backgroundColor: '#0f172a', overflow: 'hidden' }}>
                     <img
                       src={req.image_url}
@@ -345,10 +345,10 @@ export const ProviderDashboard: React.FC = () => {
                     />
                     <div style={{
                       position: 'absolute', top: '12px', right: '12px',
-                      background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '6px 12px', borderRadius: '20px',
+                      background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '6px 12px', borderRadius: '6px',
                       backdropFilter: 'blur(4px)', fontWeight: 800, fontSize: '0.88rem', border: '1px solid rgba(255,255,255,0.2)'
                     }}>
-                      🛠️ Labor Charge: ₹{req.final_price}
+                      Labor Charge: ₹{req.final_price}
                     </div>
                     <div style={{
                       position: 'absolute', bottom: '10px', left: '12px',
@@ -407,8 +407,8 @@ export const ProviderDashboard: React.FC = () => {
                     <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.76rem', color: 'var(--color-muted)', borderTop: '1px solid #f1f5f9', paddingTop: '8px' }}>
                       <span>Contact: {req.customer_phone}</span>
                       {isClashing && (
-                        <span style={{ color: 'var(--color-terracotta)', fontWeight: 700 }}>
-                          ⚠️ Schedule clash on {req.scheduled_date}
+                        <span style={{ color: 'var(--color-terracotta)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                          <AlertCircle size={13} /> Schedule clash on {req.scheduled_date}
                         </span>
                       )}
                     </div>

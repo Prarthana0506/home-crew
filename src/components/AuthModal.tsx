@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, LogIn, UserPlus, User, Wrench, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { X, LogIn, UserPlus, User, Wrench, Eye, EyeOff, AlertCircle, ShieldCheck } from 'lucide-react';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -100,10 +100,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
         <div style={{ padding: '20px 22px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 style={{ fontWeight: 800, fontSize: '1.25rem', color: 'var(--color-teal-dark)' }}>
-              {tab === 'login' ? 'Welcome Back 👋' : 'Create Account'}
+              {tab === 'login' ? 'Welcome Back' : 'Create Account'}
             </h2>
             <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', marginTop: '2px' }}>
-              One account — switch roles anytime after login.
+              One account: switch roles anytime after login.
             </p>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: 'var(--color-muted)' }}>
@@ -224,7 +224,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
               {(role === 'provider' || role === 'both') && (
                 <div style={{ backgroundColor: 'var(--color-gold-light)', border: '2px solid var(--color-gold)', borderRadius: '12px', padding: '14px', marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--color-teal-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>🛡️</span> Provider Identity & Safety Verification
+                    <ShieldCheck size={16} color="var(--color-teal-dark)" /> Provider Identity &amp; Safety Verification
                   </div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginTop: '-6px' }}>
                     Required for identity verification, background safety checks, and resolving future customer disputes.
@@ -239,14 +239,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
                         background: providerType === 'freelancer' ? '#fff' : 'transparent', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer',
                         boxShadow: providerType === 'freelancer' ? 'var(--shadow-flat-sm)' : 'none'
                       }}>
-                        👤 Individual / Freelancer
+                        Individual / Freelancer
                       </button>
                       <button type="button" onClick={() => setProviderType('organization')} style={{
                         flex: 1, padding: '8px', borderRadius: '8px', border: `2px solid ${providerType === 'organization' ? 'var(--color-gold)' : '#cbd5e1'}`,
                         background: providerType === 'organization' ? '#fff' : 'transparent', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer',
                         boxShadow: providerType === 'organization' ? 'var(--shadow-flat-gold)' : 'none'
                       }}>
-                        🏢 Registered Organization
+                        Registered Organization
                       </button>
                     </div>
                   </div>

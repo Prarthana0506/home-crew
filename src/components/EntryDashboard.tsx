@@ -151,7 +151,7 @@ export const EntryDashboard: React.FC = () => {
                       boxShadow: role === r ? (r === 'customer' ? 'var(--shadow-flat-red)' : '2px 2px 0 var(--color-gold)') : 'none',
                       color: 'var(--color-teal-dark)'
                     }}>
-                      {r === 'customer' ? '👤 Customer User' : '🛠️ Service Provider'}
+                      {r === 'customer' ? 'Customer Account' : 'Service Provider'}
                     </button>
                   ))}
                 </div>
@@ -199,13 +199,13 @@ export const EntryDashboard: React.FC = () => {
           {/* Quick Demo Logins */}
           <div style={{ marginTop: '20px', borderTop: '2px dashed var(--color-teal-dark)', paddingTop: '16px' }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--color-teal-dark)', marginBottom: '8px' }}>
-              ⚡ 1-Click Quick Demo Login:
+              Demo Login Accounts:
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               {[
-                { email: 'aarav@urbanclap.com', label: '👤 Customer: Aarav Sharma', badge: 'Customer', badgeClass: 'badge-ordinary' },
-                { email: 'rajesh@quickfix.com', label: '🛠️ Provider: Rajesh QuickFix (4.8★)', badge: 'Provider', badgeClass: 'badge-coins' },
-                { email: 'admin@urbanclap.com', label: '🛡️ Admin: Operations Console', badge: 'Admin', badgeClass: 'badge-emergency' },
+                { email: 'aarav@urbanclap.com', label: 'Customer: Aarav Sharma', badge: 'Customer', badgeClass: 'badge-ordinary' },
+                { email: 'rajesh@quickfix.com', label: 'Provider: Rajesh QuickFix', badge: 'Provider', badgeClass: 'badge-coins' },
+                { email: 'admin@urbanclap.com', label: 'Admin: Operations Console', badge: 'Admin', badgeClass: 'badge-emergency' },
               ].map(item => (
                 <button key={item.email} type="button" onClick={() => handleQuickDemoLogin(item.email)}
                   className="btn-flat btn-flat-secondary"

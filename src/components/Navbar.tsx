@@ -33,27 +33,47 @@ export const Navbar: React.FC = () => {
           {/* Desktop: Role switcher + user info (only when logged in) */}
           {isAuthenticated && currentUser && (
             <>
-              {/* Role pill toggle — ALWAYS visible so any user can switch between Customer and Provider view */}
-              <div className="role-pill" style={{ flexShrink: 0 }}>
-                <button
-                  className={`role-pill-btn ${activeRole === 'customer' ? 'active-user' : ''}`}
-                  onClick={() => handleSwitch('customer')}
-                  title="Switch to Customer view">
-                  <User size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-                  Customer
-                </button>
-                <button
-                  className={`role-pill-btn ${activeRole === 'provider' ? 'active-provider' : ''}`}
-                  onClick={() => handleSwitch('provider')}
-                  title="Switch to Provider view">
-                  <Wrench size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
-                  Provider
-                </button>
-              </div>
+              {/* Dual Role ('both' or 'admin') -> Show Role Toggle Switcher */}
+              {(currentUser.role === 'both' || currentUser.role === 'admin') ? (
+                <div className="role-pill" style={{ flexShrink: 0 }}>
+                  <button
+                    className={`role-pill-btn ${activeRole === 'customer' ? 'active-user' : ''}`}
+                    onClick={() => handleSwitch('customer')}
+                    title="Switch to Customer view">
+                    <User size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
+                    Customer
+                  </button>
+                  <button
+                    className={`role-pill-btn ${activeRole === 'provider' ? 'active-provider' : ''}`}
+                    onClick={() => handleSwitch('provider')}
+                    title="Switch to Provider view">
+                    <Wrench size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: '4px' }} />
+                    Provider
+                  </button>
+                </div>
+              ) : (
+                /* Single Role Account -> Show fixed dedicated role badge, NO switch buttons */
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  background: currentUser.role === 'provider' ? 'rgba(226,155,56,0.18)' : '#e0f2fe',
+                  border: `1.5px solid ${currentUser.role === 'provider' ? 'var(--color-gold)' : '#38bdf8'}`,
+                  color: currentUser.role === 'provider' ? 'var(--color-gold)' : '#0369a1',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  flexShrink: 0
+                }}>
+                  {currentUser.role === 'provider' ? <Wrench size={14} /> : <User size={14} />}
+                  <span>{currentUser.role === 'provider' ? 'Service Provider' : 'Customer Account'}</span>
+                </div>
+              )}
 
-              {/* Coins — ONLY shown in Provider Portal */}
+              {/* Coins: Shown in Provider Portal */}
               {activeRole === 'provider' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(226,155,56,0.18)', border: '1.5px solid var(--color-gold)', borderRadius: '20px', padding: '5px 10px', flexShrink: 0 }} title="Provider Coins Wallet">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'rgba(226,155,56,0.18)', border: '1.5px solid var(--color-gold)', borderRadius: '6px', padding: '5px 10px', flexShrink: 0 }} title="Provider Coins Wallet">
                   <Coins size={15} color="var(--color-gold)" />
                   <span style={{ fontWeight: 800, fontSize: '0.85rem', color: 'var(--color-gold)' }}>{currentUser.coins ?? 25}</span>
                 </div>
@@ -61,7 +81,7 @@ export const Navbar: React.FC = () => {
 
               {/* Avatar + name */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: activeRole === 'provider' ? 'var(--color-gold)' : '#0ea5e9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #fff', flexShrink: 0 }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '6px', background: activeRole === 'provider' ? 'var(--color-gold)' : '#0ea5e9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #fff', flexShrink: 0 }}>
                   {activeRole === 'provider' ? <Wrench size={15} color="#fff" /> : <User size={15} color="#fff" />}
                 </div>
                 <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fff', maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -71,7 +91,7 @@ export const Navbar: React.FC = () => {
 
               {/* Logout */}
               <button onClick={logout} title="Log out"
-                style={{ background: 'rgba(255,255,255,0.1)', border: '1.5px solid rgba(255,255,255,0.3)', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer', color: '#c8dfe3', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem', fontWeight: 700, transition: 'background 0.15s', flexShrink: 0 }}
+                style={{ background: 'rgba(255,255,255,0.1)', border: '1.5px solid rgba(255,255,255,0.3)', borderRadius: '6px', padding: '7px 10px', cursor: 'pointer', color: '#c8dfe3', display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.8rem', fontWeight: 700, transition: 'background 0.15s', flexShrink: 0 }}
                 onMouseEnter={e => (e.currentTarget.style.background = 'rgba(217,78,56,0.25)')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}>
                 <LogOut size={15} />
@@ -100,8 +120,9 @@ export const Navbar: React.FC = () => {
           <div style={{ background: activeRole === 'provider' ? 'rgba(226,155,56,0.15)' : 'rgba(14,165,233,0.12)', borderTop: `2px solid ${activeRole === 'provider' ? 'var(--color-gold)' : '#0ea5e9'}`, padding: '5px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: activeRole === 'provider' ? 'var(--color-gold)' : '#0ea5e9', animation: 'pulse 2s infinite' }} />
             <span style={{ fontSize: '0.78rem', fontWeight: 700, color: activeRole === 'provider' ? 'var(--color-gold)' : '#7dd3f5', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Viewing as {activeRole === 'provider' ? '🛠️ Service Provider' : '👤 Customer'}
-              {(currentUser?.role === 'both' || currentUser?.role === 'admin') ? ' — tap the pill above to switch roles anytime' : ' (Single Role Account)'}
+              {(currentUser?.role === 'both' || currentUser?.role === 'admin')
+                ? `Dual Role Account: Viewing as ${activeRole === 'provider' ? 'Service Provider' : 'Customer'} (Switch view anytime using toggle above)`
+                : `Single Role Account: Dedicated ${currentUser?.role === 'provider' ? 'Service Provider' : 'Customer'} Account`}
             </span>
           </div>
         )}
@@ -113,8 +134,8 @@ export const Navbar: React.FC = () => {
           50% { opacity: 0.6; transform: scale(1.3); }
         }
         @media (max-width: 520px) {
-          .role-pill { border-radius: 50px; }
-          .role-pill-btn { font-size: 0.78rem; padding: 6px 10px; }
+          .role-pill { border-radius: 6px; }
+          .role-pill-btn { font-size: 0.78rem; padding: 6px 10px; border-radius: 4px; }
         }
       `}</style>
     </>
