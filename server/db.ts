@@ -144,8 +144,12 @@ export function initDb() {
     db.exec("ALTER TABLE users ADD COLUMN gst_number TEXT");
   }
 
-  // Ensure default demo users have dual role ('both')
-  db.exec("UPDATE users SET role = 'both' WHERE email IN ('aarav@urbanclap.com', 'rajesh@quickfix.com') AND role != 'both';");
+  // Ensure demo accounts have designated roles
+  db.exec(`
+    UPDATE users SET role = 'customer' WHERE email IN ('priya@urbanclap.com', 'aarav@urbanclap.com') AND role != 'customer';
+    UPDATE users SET role = 'provider' WHERE email IN ('vikram@craftsman.com', 'suresh@plumbing.com') AND role != 'provider';
+    UPDATE users SET role = 'both' WHERE email IN ('rajesh@quickfix.com') AND role != 'both';
+  `);
 
   // Seed default categories
   const categories = [

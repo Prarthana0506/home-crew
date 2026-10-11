@@ -203,8 +203,9 @@ export const EntryDashboard: React.FC = () => {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
               {[
-                { email: 'aarav@urbanclap.com', label: 'Customer: Aarav Sharma', badge: 'Customer', badgeClass: 'badge-ordinary' },
-                { email: 'rajesh@quickfix.com', label: 'Provider: Rajesh QuickFix', badge: 'Provider', badgeClass: 'badge-coins' },
+                { email: 'priya@urbanclap.com', label: 'Single Role Customer: Priya Verma', badge: 'Customer', badgeClass: 'badge-ordinary' },
+                { email: 'vikram@craftsman.com', label: 'Single Role Provider: Vikram Singh', badge: 'Provider', badgeClass: 'badge-coins' },
+                { email: 'rajesh@quickfix.com', label: 'Dual Role (Both): Rajesh QuickFix', badge: 'Both Roles', badgeClass: 'badge-user' },
                 { email: 'admin@urbanclap.com', label: 'Admin: Operations Console', badge: 'Admin', badgeClass: 'badge-emergency' },
               ].map(item => (
                 <button key={item.email} type="button" onClick={() => handleQuickDemoLogin(item.email)}

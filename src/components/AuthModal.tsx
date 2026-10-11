@@ -75,10 +75,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
     } finally { setLoading(false); }
   };
 
-  // Quick demo logins
+  // Quick demo logins with distinct roles
   const demos = [
-    { email: 'aarav@urbanclap.com', label: 'Demo Customer', role: 'Customer' },
-    { email: 'rajesh@quickfix.com', label: 'Demo Provider', role: 'Provider' },
+    { email: 'priya@urbanclap.com', label: 'Single Role Customer', role: 'Customer' },
+    { email: 'vikram@craftsman.com', label: 'Single Role Provider', role: 'Provider' },
+    { email: 'rajesh@quickfix.com', label: 'Dual Role Account', role: 'Both' },
   ];
 
   const handleDemo = async (demoEmail: string) => {
@@ -161,40 +162,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose }) => {
             <form onSubmit={handleSignup} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {/* Role selector */}
               <div>
-                <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-teal-dark)' }}>I want to join as</label>
+                <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem', marginBottom: '8px', color: 'var(--color-teal-dark)' }}>Account Role Selection *</label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '8px' }}>
                   <button type="button" onClick={() => setRole('customer')} style={{
-                    padding: '10px 8px', borderRadius: '10px', border: `2px solid ${role === 'customer' ? '#0ea5e9' : 'var(--color-teal-dark)'}`,
+                    padding: '10px 8px', borderRadius: '6px', border: `2px solid ${role === 'customer' ? '#0ea5e9' : 'var(--color-teal-dark)'}`,
                     background: role === 'customer' ? '#e0f2fe' : '#fff', cursor: 'pointer', transition: 'all .15s',
                     boxShadow: role === 'customer' ? '2px 2px 0 #0369a1' : 'none'
                   }}>
-                    <User size={20} color={role === 'customer' ? '#0369a1' : 'var(--color-teal-dark)'} style={{ margin: '0 auto 4px', display: 'block' }} />
+                    <User size={18} color={role === 'customer' ? '#0369a1' : 'var(--color-teal-dark)'} style={{ margin: '0 auto 4px', display: 'block' }} />
                     <div style={{ fontWeight: 800, fontSize: '0.82rem', color: role === 'customer' ? '#0369a1' : 'var(--color-teal-dark)' }}>Customer</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginTop: '2px' }}>Need services</div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)', marginTop: '2px' }}>Single Role</div>
                   </button>
 
                   <button type="button" onClick={() => setRole('provider')} style={{
-                    padding: '10px 8px', borderRadius: '10px', border: `2px solid ${role === 'provider' ? '#c47e1a' : 'var(--color-teal-dark)'}`,
+                    padding: '10px 8px', borderRadius: '6px', border: `2px solid ${role === 'provider' ? '#c47e1a' : 'var(--color-teal-dark)'}`,
                     background: role === 'provider' ? 'var(--color-gold-light)' : '#fff', cursor: 'pointer', transition: 'all .15s',
                     boxShadow: role === 'provider' ? 'var(--shadow-flat-gold)' : 'none'
                   }}>
-                    <Wrench size={20} color={role === 'provider' ? '#c47e1a' : 'var(--color-teal-dark)'} style={{ margin: '0 auto 4px', display: 'block' }} />
+                    <Wrench size={18} color={role === 'provider' ? '#c47e1a' : 'var(--color-teal-dark)'} style={{ margin: '0 auto 4px', display: 'block' }} />
                     <div style={{ fontWeight: 800, fontSize: '0.82rem', color: role === 'provider' ? '#c47e1a' : 'var(--color-teal-dark)' }}>Provider</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginTop: '2px' }}>Offer services</div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)', marginTop: '2px' }}>Single Role</div>
                   </button>
 
                   <button type="button" onClick={() => setRole('both')} style={{
-                    padding: '10px 8px', borderRadius: '10px', border: `2px solid ${role === 'both' ? 'var(--color-terracotta)' : 'var(--color-teal-dark)'}`,
+                    padding: '10px 8px', borderRadius: '6px', border: `2px solid ${role === 'both' ? 'var(--color-terracotta)' : 'var(--color-teal-dark)'}`,
                     background: role === 'both' ? 'var(--color-coral-light)' : '#fff', cursor: 'pointer', transition: 'all .15s',
                     boxShadow: role === 'both' ? 'var(--shadow-flat-red)' : 'none'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '2px', margin: '0 auto 4px' }}>
-                      <User size={18} color={role === 'both' ? 'var(--color-terracotta)' : 'var(--color-teal-dark)'} />
-                      <Wrench size={18} color={role === 'both' ? 'var(--color-terracotta)' : 'var(--color-teal-dark)'} />
+                      <User size={16} color={role === 'both' ? 'var(--color-terracotta)' : 'var(--color-teal-dark)'} />
+                      <Wrench size={16} color={role === 'both' ? 'var(--color-terracotta)' : 'var(--color-teal-dark)'} />
                     </div>
                     <div style={{ fontWeight: 800, fontSize: '0.82rem', color: role === 'both' ? 'var(--color-terracotta-dark)' : 'var(--color-teal-dark)' }}>Both Roles</div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginTop: '2px' }}>Switch pill enabled</div>
+                    <div style={{ fontSize: '0.68rem', color: 'var(--color-muted)', marginTop: '2px' }}>Dual Account</div>
                   </button>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--color-muted)', marginTop: '6px', background: '#f8fafc', padding: '6px 8px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                  {role === 'customer' && 'Single Role: You are creating an account strictly as a Customer. Role switching is disabled.'}
+                  {role === 'provider' && 'Single Role: You are creating an account strictly as a Service Provider. Role switching is disabled.'}
+                  {role === 'both' && 'Dual Role: You are creating an account with both permissions and can switch views anytime.'}
                 </div>
               </div>
 
