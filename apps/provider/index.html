@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/icon-192.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HomeCrew Partner – Service Provider Portal</title>
+    <meta name="description" content="HomeCrew Coimbatore service partner portal — manage jobs, bids, calendar and earnings as a verified freelancer or organisation." />
+    <meta name="application-name" content="HomeCrew Partner" />
+    <meta name="theme-color" content="#d94e38" />
+    <link rel="manifest" href="/manifest.json" />
+    <!-- Open Graph -->
+    <meta property="og:title" content="HomeCrew Partner Portal" />
+    <meta property="og:description" content="Join HomeCrew as a verified home-service provider. Bid on local jobs and grow your business." />
+    <meta property="og:type" content="website" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+# .github/workflows/keep-supabase-alive.yml
+#
+# Pings the Supabase REST API once a day so the free-tier project
+# never auto-pauses (Supabase pauses projects inactive for >7 days).
+# Uses only the public anon key — no sensitive write access.
+
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    # Run at 06:00 UTC every day (11:30 AM IST)
+    - cron: '0 6 * * *'
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping Supabase REST API
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Ping /rest/v1/ health endpoint
+        env:
+          SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          echo "🏓 Pinging Supabase at $SUPABASE_URL ..."
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/service_categories?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+
+          echo "HTTP status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo "✅ Supabase is alive and responding."
+          elif [ "$HTTP_STATUS" = "404" ]; then
+            echo "⚠️  404 returned — project may still be waking up. Not a failure."
+            exit 0
+          else
+            echo "❌ Unexpected HTTP status $HTTP_STATUS"
+            exit 1
+          fi
+
+      - name: Record ping timestamp
+        run: echo "Last successful ping $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY

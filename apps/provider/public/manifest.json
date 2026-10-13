@@ -1,0 +1,33 @@
+{
+  "short_name": "HomeCrew Partner",
+  "name": "HomeCrew – Service Partner Portal",
+  "description": "Manage jobs, bids and earnings as a HomeCrew verified service partner in Coimbatore.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ],
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#fdf8f3",
+  "theme_color": "#d94e38",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["utilities", "business"],
+  "lang": "en-IN"
+}

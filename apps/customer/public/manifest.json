@@ -1,0 +1,33 @@
+{
+  "short_name": "HomeCrew",
+  "name": "HomeCrew – Home Services Coimbatore",
+  "description": "Book scheduled home repairs or emergency dispatch with verified technicians in Coimbatore.",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ],
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#fdf8f3",
+  "theme_color": "#0e7490",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["utilities", "lifestyle"],
+  "lang": "en-IN"
+}

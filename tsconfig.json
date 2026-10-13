@@ -1,27 +1,32 @@
 {
-  "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
-    }
-  ],
   "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "strict": false,
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
+      "@urbanclap/lib": ["./packages/lib/src/index.ts"],
+      "@urbanclap/ui": ["./packages/ui/src/index.ts"],
+      "@urbanclap/ui/*": ["./packages/ui/*"]
     }
   },
   "include": [
-    "src"
+    "apps",
+    "packages"
   ],
   "exclude": [
     "node_modules",
-    "server",
     "dist"
   ]
 }
