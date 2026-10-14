@@ -14,11 +14,16 @@
     "build:customer": "npm run build --workspace=@urbanclap/customer",
     "build:provider": "npm run build --workspace=@urbanclap/provider",
     "build:admin": "npm run build --workspace=@urbanclap/admin",
+    "build:lib": "npm run build --workspace=@urbanclap/lib",
     "build": "npm run build --workspaces --if-present",
     "lint:rules": "tsx scripts/check-rules.ts",
     "test:posting": "tsx scripts/test-posting-flow.ts",
     "test:race": "tsx scripts/test-race-condition.ts",
-    "check": "oxlint && tsx scripts/check-rules.ts"
+    "check": "oxlint && tsx scripts/check-rules.ts",
+    "seed": "tsx scripts/seed-demo.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "seed:refresh": "tsx scripts/seed-demo.ts --refresh",
+    "setup:demo-admin": "tsx scripts/create-demo-admin.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
@@ -32,6 +37,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "pg": "^8.23.1",
     "tsx": "^4.23.15",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"

@@ -26,7 +26,16 @@ import {
   fetchInAppNotifications,
   subscribeToInAppNotifications,
   requestPushPermissionAndRegister,
-  getPushPermissionState
+  getPushPermissionState,
+  adminGetAllowEarlyFinish,
+  customerCancelRequest,
+  markJobFinishedByRole,
+  isValidEmail,
+  sendConfirmationEmail,
+  getBookingEmailDetails,
+  generateRequestConfirmationEmail,
+  generateBookingConfirmationEmail,
+  supabase,
 } from '@urbanclap/lib';
 import {
   Navbar,
@@ -48,7 +57,8 @@ import {
   NotificationInboxModal,
   PrivacyPolicyPage,
   TermsPage,
-  AppFooter
+  AppFooter,
+  EmailValidationModal,
 } from '@urbanclap/ui';
 import {
   PlusCircle,
@@ -64,7 +74,9 @@ import {
   Building2,
   User,
   Users,
-  FileText
+  FileText,
+  XCircle,
+  AlertTriangle
 } from 'lucide-react';
 
 const CustomerAppContent: React.FC = () => {
@@ -79,6 +91,11 @@ const CustomerAppContent: React.FC = () => {
     emergency_min_lead_hours: 2.0
   });
   const [pendingReview, setPendingReview] = useState<PendingReviewInfo | null>(null);
+
+  // Early finish & Cancel states
+  const [allowEarlyFinish, setAllowEarlyFinish] = useState<boolean>(false);
+  const [finishingJobId, setFinishingJobId] = useState<string | null>(null);
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   const [_loading, setLoading] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -164,6 +181,22 @@ const CustomerAppContent: React.FC = () => {
   const [inboxOpen, setInboxOpen] = useState(false);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
 
+  // Email Confirmation & Invalid Mail State
+  const [emailModalState, setEmailModalState] = useState<{
+    isOpen: boolean;
+    reason: 'request_confirmation' | 'booking_confirmation';
+    jobTitle?: string;
+    requestId?: string;
+    bookingId?: string;
+    customerName?: string;
+    categoryName?: string;
+    scheduledTime?: string;
+    address?: string;
+    price?: number;
+    otherPartyName?: string;
+    otherPartyPhone?: string;
+  } | null>(null);
+
   const loadUnreadNotifs = useCallback(async () => {
     if (!authUser?.id) return;
     try {
@@ -195,14 +228,16 @@ const CustomerAppContent: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [cats, ars, stt] = await Promise.all([
+      const [cats, ars, stt, earlyFinishRes] = await Promise.all([
         fetchCategories(),
         fetchAreas(),
-        fetchSettings()
+        fetchSettings(),
+        adminGetAllowEarlyFinish().catch(() => ({ enabled: false }))
       ]);
       setCategories(cats);
       setAreas(ars);
       setSettings(stt);
+      setAllowEarlyFinish(Boolean(earlyFinishRes?.enabled));
 
       if (cats.length > 0 && !selectedCategory) {
         setSelectedCategory(cats[0].id);
@@ -229,6 +264,20 @@ const CustomerAppContent: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [authUser?.id, profile?.area_id]);
+
+  // Realtime: re-fetch when admin updates settings (demo mode, early finish toggle, etc.)
+  useEffect(() => {
+    if (!authUser?.id) return;
+    const channel = supabase
+      .channel('customer-settings-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        () => { loadData(); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [authUser?.id]);
 
   // Realtime: subscribe to live bidding updates for each of the customer's active emergency requests
   useEffect(() => {
@@ -487,15 +536,64 @@ const CustomerAppContent: React.FC = () => {
     // Ordinary request: Direct atomic creation
     setSubmitting(true);
     try {
-      await createRequestAtomic({
+      const res = await createRequestAtomic({
         ...payload,
         feePaymentId: null
       });
 
-      setFormMsg({
-        type: 'success',
-        text: `Ordinary service request confirmed at Rs ${finalPrice}! Scheduled for ${scheduledDate} at ${scheduledTime}.`
-      });
+      const customerEmail = authUser?.email || profile?.email || '';
+      const catName = categories.find(c => c.id === payload.categoryId)?.name || 'Home Service';
+
+      if (isValidEmail(customerEmail)) {
+        try {
+          const emailData = generateRequestConfirmationEmail({
+            requestId: res.request_id,
+            customerName: profile?.name || 'Customer',
+            title: payload.title,
+            categoryName: catName,
+            scheduledTime: payload.preferredStart,
+            address: payload.addressConfidential || 'Address on file',
+            price: finalPrice,
+            isEmergency: false,
+          });
+          await sendConfirmationEmail({
+            userId: authUser?.id,
+            email: customerEmail,
+            recipientName: profile?.name,
+            recipientRole: 'customer',
+            emailType: 'request_confirmation',
+            subject: emailData.subject,
+            bodyText: emailData.bodyText,
+            bodyHtml: emailData.bodyHtml,
+            requestId: res.request_id,
+          });
+          setFormMsg({
+            type: 'success',
+            text: `Ordinary service request confirmed at Rs ${finalPrice}! Scheduled for ${scheduledDate} at ${scheduledTime}. Request confirmation mail sent to ${customerEmail}.`
+          });
+        } catch {
+          setFormMsg({
+            type: 'success',
+            text: `Ordinary service request confirmed at Rs ${finalPrice}! Scheduled for ${scheduledDate} at ${scheduledTime}.`
+          });
+        }
+      } else {
+        setFormMsg({
+          type: 'success',
+          text: `Ordinary service request confirmed at Rs ${finalPrice}! Note: Registered mail is not valid.`
+        });
+        setEmailModalState({
+          isOpen: true,
+          reason: 'request_confirmation',
+          jobTitle: payload.title,
+          requestId: res.request_id,
+          customerName: profile?.name || 'Customer',
+          categoryName: catName,
+          scheduledTime: payload.preferredStart,
+          address: payload.addressConfidential || 'Address on file',
+          price: finalPrice,
+        });
+      }
 
       // Reset form
       setTitle('');
@@ -523,15 +621,64 @@ const CustomerAppContent: React.FC = () => {
 
     setSubmitting(true);
     try {
-      await createRequestAtomic({
+      const res = await createRequestAtomic({
         ...pendingEmergencyPayload,
         feePaymentId
       });
 
-      setFormMsg({
-        type: 'success',
-        text: `Emergency service listing posted at Rs ${pendingEmergencyPayload.offeredPrice}! 45-minute live bidding arena broadcasted to verified local providers.`
-      });
+      const customerEmail = authUser?.email || profile?.email || '';
+      const catName = categories.find(c => c.id === pendingEmergencyPayload.categoryId)?.name || 'Emergency Service';
+
+      if (isValidEmail(customerEmail)) {
+        try {
+          const emailData = generateRequestConfirmationEmail({
+            requestId: res.request_id,
+            customerName: profile?.name || 'Customer',
+            title: pendingEmergencyPayload.title,
+            categoryName: catName,
+            scheduledTime: pendingEmergencyPayload.preferredStart,
+            address: pendingEmergencyPayload.addressConfidential || 'Address on file',
+            price: pendingEmergencyPayload.offeredPrice,
+            isEmergency: true,
+          });
+          await sendConfirmationEmail({
+            userId: authUser?.id,
+            email: customerEmail,
+            recipientName: profile?.name,
+            recipientRole: 'customer',
+            emailType: 'request_confirmation',
+            subject: emailData.subject,
+            bodyText: emailData.bodyText,
+            bodyHtml: emailData.bodyHtml,
+            requestId: res.request_id,
+          });
+          setFormMsg({
+            type: 'success',
+            text: `Emergency service listing posted at Rs ${pendingEmergencyPayload.offeredPrice}! Live bidding arena active. Request confirmation mail sent to ${customerEmail}.`
+          });
+        } catch {
+          setFormMsg({
+            type: 'success',
+            text: `Emergency service listing posted at Rs ${pendingEmergencyPayload.offeredPrice}! 45-minute live bidding arena broadcasted to verified local providers.`
+          });
+        }
+      } else {
+        setFormMsg({
+          type: 'success',
+          text: `Emergency service listing posted at Rs ${pendingEmergencyPayload.offeredPrice}! Note: Registered mail is not valid.`
+        });
+        setEmailModalState({
+          isOpen: true,
+          reason: 'request_confirmation',
+          jobTitle: pendingEmergencyPayload.title,
+          requestId: res.request_id,
+          customerName: profile?.name || 'Customer',
+          categoryName: catName,
+          scheduledTime: pendingEmergencyPayload.preferredStart,
+          address: pendingEmergencyPayload.addressConfidential || 'Address on file',
+          price: pendingEmergencyPayload.offeredPrice,
+        });
+      }
 
       setTitle('');
       setDescription('');
@@ -557,16 +704,215 @@ const CustomerAppContent: React.FC = () => {
     try {
       const startTime = req.preferred_start;
       const endTime = new Date(new Date(req.preferred_start).getTime() + 2 * 60 * 60 * 1000).toISOString();
-      await acceptBid(req.id, bid.provider_profile_id, startTime, endTime);
-      alert('Bid accepted! The technician has been assigned and scheduled. Open chat to coordinate arrival.');
+      const bRes = await acceptBid(req.id, bid.provider_profile_id, startTime, endTime);
+      const bookingId = (bRes as any)?.id || (bRes as any)?.booking_id;
+
+      try {
+        const details = await getBookingEmailDetails({ requestId: req.id, bookingId });
+        const customerEmail = authUser?.email || profile?.email || details.customer?.email || '';
+        const providerEmail = details.provider?.email || '';
+
+        // Provider email
+        if (isValidEmail(providerEmail)) {
+          const provEmail = generateBookingConfirmationEmail({
+            bookingId: bookingId || req.id,
+            requestId: req.id,
+            recipientRole: 'provider',
+            recipientName: details.provider?.name || 'Technician',
+            otherPartyName: details.customer?.name || 'Customer',
+            otherPartyPhone: details.customer?.phone || '--',
+            title: req.title,
+            categoryName: details.category_name,
+            scheduledTime: req.preferred_start,
+            address: req.address_confidential || 'On file',
+            price: bid.coins || req.offered_price,
+          });
+          sendConfirmationEmail({
+            userId: details.provider?.user_id,
+            email: providerEmail,
+            recipientName: details.provider?.name,
+            recipientRole: 'provider',
+            emailType: 'booking_confirmation',
+            subject: provEmail.subject,
+            bodyText: provEmail.bodyText,
+            bodyHtml: provEmail.bodyHtml,
+            requestId: req.id,
+            bookingId,
+          }).catch(console.warn);
+        }
+
+        // Customer email
+        if (isValidEmail(customerEmail)) {
+          const custEmail = generateBookingConfirmationEmail({
+            bookingId: bookingId || req.id,
+            requestId: req.id,
+            recipientRole: 'customer',
+            recipientName: details.customer?.name || 'Customer',
+            otherPartyName: details.provider?.name || 'Technician',
+            otherPartyPhone: details.provider?.phone || '--',
+            title: req.title,
+            categoryName: details.category_name,
+            scheduledTime: req.preferred_start,
+            address: req.address_confidential || 'On file',
+            price: bid.coins || req.offered_price,
+          });
+          await sendConfirmationEmail({
+            userId: authUser?.id,
+            email: customerEmail,
+            recipientName: details.customer?.name,
+            recipientRole: 'customer',
+            emailType: 'booking_confirmation',
+            subject: custEmail.subject,
+            bodyText: custEmail.bodyText,
+            bodyHtml: custEmail.bodyHtml,
+            requestId: req.id,
+            bookingId,
+          });
+          alert(`Bid accepted! Technician assigned. Booking confirmation mail sent to ${customerEmail}.`);
+        } else {
+          setEmailModalState({
+            isOpen: true,
+            reason: 'booking_confirmation',
+            jobTitle: req.title,
+            requestId: req.id,
+            bookingId,
+            customerName: details.customer?.name,
+            otherPartyName: details.provider?.name,
+            otherPartyPhone: details.provider?.phone,
+            categoryName: details.category_name,
+            scheduledTime: req.preferred_start,
+            address: req.address_confidential || 'On file',
+            price: bid.coins || req.offered_price,
+          });
+        }
+      } catch (emailErr) {
+        console.warn('Booking confirmation email error:', emailErr);
+        alert('Bid accepted! The technician has been assigned and scheduled. Open chat to coordinate arrival.');
+      }
+
       await loadData();
     } catch (err: any) {
       alert(err.message || 'Failed to accept bid');
     }
   };
 
-  const activeBiddingList = requests.filter(r => r.type === 'emergency' && r.status === 'bidding_active');
-  const upcomingBookings = requests.filter(r => r.status === 'assigned' || r.status === 'in_progress');
+  const handleSendEmailFromModal = async (givenEmail: string): Promise<{ success: boolean; message?: string }> => {
+    if (!emailModalState) return { success: false, message: 'No email session active.' };
+
+    try {
+      if (emailModalState.reason === 'request_confirmation') {
+        const emailData = generateRequestConfirmationEmail({
+          requestId: emailModalState.requestId || '',
+          customerName: emailModalState.customerName || profile?.name || 'Customer',
+          title: emailModalState.jobTitle || 'Service Request',
+          categoryName: emailModalState.categoryName || 'Home Service',
+          scheduledTime: emailModalState.scheduledTime || new Date().toISOString(),
+          address: emailModalState.address || 'Address on file',
+          price: emailModalState.price || 0,
+        });
+
+        const res = await sendConfirmationEmail({
+          userId: authUser?.id,
+          email: givenEmail,
+          recipientName: profile?.name,
+          recipientRole: 'customer',
+          emailType: 'request_confirmation',
+          subject: emailData.subject,
+          bodyText: emailData.bodyText,
+          bodyHtml: emailData.bodyHtml,
+          requestId: emailModalState.requestId,
+        });
+        return res;
+      } else {
+        const emailData = generateBookingConfirmationEmail({
+          bookingId: emailModalState.bookingId || '',
+          requestId: emailModalState.requestId || '',
+          recipientRole: 'customer',
+          recipientName: emailModalState.customerName || profile?.name || 'Customer',
+          otherPartyName: emailModalState.otherPartyName || 'Technician',
+          otherPartyPhone: emailModalState.otherPartyPhone || '--',
+          title: emailModalState.jobTitle || 'Service Booking',
+          categoryName: emailModalState.categoryName || 'Home Service',
+          scheduledTime: emailModalState.scheduledTime || new Date().toISOString(),
+          address: emailModalState.address || 'On file',
+          price: emailModalState.price || 0,
+        });
+
+        const res = await sendConfirmationEmail({
+          userId: authUser?.id,
+          email: givenEmail,
+          recipientName: profile?.name,
+          recipientRole: 'customer',
+          emailType: 'booking_confirmation',
+          subject: emailData.subject,
+          bodyText: emailData.bodyText,
+          bodyHtml: emailData.bodyHtml,
+          requestId: emailModalState.requestId,
+          bookingId: emailModalState.bookingId,
+        });
+        return res;
+      }
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
+
+  const handleCustomerFinishJob = async (req: ServiceRequest) => {
+    if (!authUser?.id) return;
+    if (!confirm(`Mark "${req.title}" as finished? When both you and the technician confirm, the job completes immediately and review opens.`)) return;
+    setFinishingJobId(req.id);
+    try {
+      const res = await markJobFinishedByRole(req.id, authUser.id, 'customer');
+      if (res.success) {
+        if (res.both_finished) {
+          alert(res.message || 'Both parties marked the job finished! Please share your review.');
+          const booking = (req.bookings && req.bookings.length > 0) ? req.bookings[0] : null;
+          const bId = booking?.id || (res as any).booking_id;
+          if (bId) {
+            setReviewBookingId(bId);
+          } else {
+            setReviewRequest(req);
+          }
+        } else {
+          alert(res.message || 'You marked this job finished. Waiting for the technician to confirm.');
+        }
+        await loadData();
+      } else {
+        alert(res.error || 'Failed to mark job finished');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to mark job finished');
+    } finally {
+      setFinishingJobId(null);
+    }
+  };
+
+  const handleCustomerCancelRequest = async (req: ServiceRequest) => {
+    if (!authUser?.id) return;
+    const hasProvider = Boolean(req.assigned_provider_profile_id);
+    const confirmText = hasProvider
+      ? `Warning: A provider is already assigned to "${req.title}". Cancelling now will deduct 0.1 from your customer rating.\n\nAre you sure you want to cancel?`
+      : `Are you sure you want to cancel "${req.title}"? No penalty will be applied.`;
+    if (!confirm(confirmText)) return;
+
+    setCancellingJobId(req.id);
+    try {
+      const res = await customerCancelRequest(req.id, authUser.id);
+      if (res.success) {
+        alert(res.message || (res.penalty_applied ? 'Booking cancelled. 0.1 rating deducted.' : 'Request cancelled successfully.'));
+        await loadData();
+      } else {
+        alert(res.error || 'Failed to cancel request');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel request');
+    } finally {
+      setCancellingJobId(null);
+    }
+  };
+
+  const activeBiddingList = requests.filter(r => r.type === 'emergency' && (r.status === 'bidding_active' || r.status === 'bidding_open' || r.status === 'interest_window'));
+  const upcomingBookings = requests.filter(r => r.status === 'assigned' || r.status === 'in_progress' || r.status === 'awarded');
   const pastHistory = requests.filter(r => r.status === 'completed' || r.status === 'cancelled');
 
   // Legal page overlay – renders instead of main content
@@ -1330,9 +1676,41 @@ const CustomerAppContent: React.FC = () => {
                                 Locality: {req.area?.name} | Budget: Rs {req.offered_price}
                               </div>
                             </div>
-                            <Button size="sm" variant="secondary" onClick={() => setChatRequest(req)}>
-                              <MessageSquare size={14} /> Open Chat
-                            </Button>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {!['completed', 'cancelled'].includes(req.status) && (
+                                <Button
+                                  id={`customer-cancel-arena-${req.id}`}
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => handleCustomerCancelRequest(req)}
+                                  disabled={cancellingJobId === req.id}
+                                  style={{ borderColor: 'var(--color-crimson)', color: '#dc2626' }}
+                                >
+                                  <XCircle size={14} /> Cancel Request
+                                </Button>
+                              )}
+                              {allowEarlyFinish && req.assigned_provider_profile_id && !['completed', 'cancelled'].includes(req.status) && (
+                                req.customer_marked_finished ? (
+                                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#059669', background: '#ecfdf5', border: '1.5px solid #059669', borderRadius: '6px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                    <CheckCircle size={14} /> You marked finished
+                                  </span>
+                                ) : (
+                                  <Button
+                                    id={`customer-finish-arena-${req.id}`}
+                                    size="sm"
+                                    variant="primary"
+                                    onClick={() => handleCustomerFinishJob(req)}
+                                    disabled={finishingJobId === req.id}
+                                    style={{ backgroundColor: '#059669', borderColor: '#047857' }}
+                                  >
+                                    <CheckCircle size={14} /> {finishingJobId === req.id ? 'Finishing…' : 'Finish Job'}
+                                  </Button>
+                                )
+                              )}
+                              <Button size="sm" variant="secondary" onClick={() => setChatRequest(req)}>
+                                <MessageSquare size={14} /> Open Chat
+                              </Button>
+                            </div>
                           </div>
 
                           {/* Live Stats Row */}
@@ -1463,7 +1841,7 @@ const CustomerAppContent: React.FC = () => {
                     request: req
                   }))}
                   role="customer"
-                  minGapHours={8.0}
+                  minGapHours={4.0}
                   onSelectBooking={b => {
                     if (b.request) setChatRequest(b.request as any);
                   }}
@@ -1509,9 +1887,41 @@ const CustomerAppContent: React.FC = () => {
                                   Provider: {req.assigned_provider?.organization?.name || req.assigned_provider?.profile?.name || 'Assigned Technician'} | Locality: {req.area?.name || 'Area'}
                                 </p>
                               </div>
-                              <Button size="sm" variant="secondary" onClick={() => setChatRequest(req)}>
-                                <MessageSquare size={14} /> Open Chat
-                              </Button>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                {allowEarlyFinish && !['completed', 'cancelled'].includes(req.status) && (
+                                  req.customer_marked_finished ? (
+                                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#059669', background: '#ecfdf5', border: '1.5px solid #059669', borderRadius: '6px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                      <CheckCircle size={14} /> You marked finished
+                                    </span>
+                                  ) : (
+                                    <Button
+                                      id={`customer-early-finish-booking-${req.id}`}
+                                      size="sm"
+                                      variant="primary"
+                                      onClick={() => handleCustomerFinishJob(req)}
+                                      disabled={finishingJobId === req.id}
+                                      style={{ backgroundColor: '#059669', borderColor: '#047857' }}
+                                    >
+                                      <CheckCircle size={14} /> {finishingJobId === req.id ? 'Finishing…' : 'Finish Job'}
+                                    </Button>
+                                  )
+                                )}
+                                {!['completed', 'cancelled'].includes(req.status) && (
+                                  <Button
+                                    id={`customer-cancel-booking-${req.id}`}
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => handleCustomerCancelRequest(req)}
+                                    disabled={cancellingJobId === req.id}
+                                    style={{ borderColor: 'var(--color-crimson)', color: '#dc2626' }}
+                                  >
+                                    <XCircle size={14} /> Cancel Booking
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="secondary" onClick={() => setChatRequest(req)}>
+                                  <MessageSquare size={14} /> Open Chat
+                                </Button>
+                              </div>
                             </div>
 
                             {/* Job Status Stepper */}
@@ -1662,6 +2072,20 @@ const CustomerAppContent: React.FC = () => {
           onNavigate={handleNotificationNavigate}
         />
       )}
+
+      {/* Email Validation Modal */}
+      {emailModalState && (
+        <EmailValidationModal
+          isOpen={emailModalState.isOpen}
+          onClose={() => setEmailModalState(null)}
+          reason={emailModalState.reason}
+          recipientRole="customer"
+          initialEmail={authUser?.email || profile?.email || ''}
+          jobTitle={emailModalState.jobTitle}
+          onSend={handleSendEmailFromModal}
+        />
+      )}
+
       <AppFooter onPrivacy={() => setLegalPage('privacy')} onTerms={() => setLegalPage('terms')} />
     </div>
   );

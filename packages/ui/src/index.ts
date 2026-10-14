@@ -21,3 +21,4 @@ export * from './NotificationInboxModal';
 export * from './OrgDashboard';
 export * from './States';
 export * from './LegalPages';
+export * from './EmailValidationModal';

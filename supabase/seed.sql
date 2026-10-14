@@ -8,7 +8,7 @@ INSERT INTO public.settings (key, value, description)
 VALUES
     ('emergency_multiplier', '{"value": 1.3}'::jsonb, 'Price multiplier for emergency dispatch jobs (+30%)'),
     ('emergency_fee', '{"value": 50.0}'::jsonb, 'Platform emergency dispatch fee in Rupees'),
-    ('min_gap_hours', '{"value": 8.0}'::jsonb, 'Mandatory gap between consecutive jobs on provider calendar'),
+    ('min_gap_hours', '{"value": 4.0}'::jsonb, 'Mandatory gap between consecutive jobs on provider calendar'),
     ('bidding_min_rating', '{"value": 3.5}'::jsonb, 'Minimum average customer rating required for emergency bidding'),
     ('bidding_min_reviews', '{"value": 3}'::jsonb, 'Minimum completed review count required for emergency bidding'),
     ('bidding_min_coins', '{"value": 35}'::jsonb, 'Minimum coin balance required for emergency bidding'),

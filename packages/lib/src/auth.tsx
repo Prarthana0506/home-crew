@@ -138,21 +138,7 @@ export const AuthProvider: React.FC<{
         password
       });
 
-      if (error) {
-        // Fallback for demo users seeded in local environments
-        const { data: demoProf } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('role', appRole)
-          .limit(1)
-          .maybeSingle();
-
-        if (demoProf) {
-          setProfile(demoProf);
-          return;
-        }
-        throw error;
-      }
+      if (error) throw error;
 
       if (data.user) {
         await loadUserProfile(data.user.id);
@@ -161,6 +147,7 @@ export const AuthProvider: React.FC<{
       setLoading(false);
     }
   };
+
 
   const signUpWithEmail = async (
     email: string,

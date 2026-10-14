@@ -14,6 +14,8 @@ dist-ssr
 .env
 .env.*
 !.env.example
+!.env.seed.example
+.env.seed
 
 # Editor directories and files
 .vscode/*

@@ -116,8 +116,17 @@ Deno.serve(async (req: Request) => {
       icon: '/favicon.svg'
     };
 
-    const fcmData = {
-      ...dataPayload,
+    // FCM data values must ALL be strings — coerce every value
+    const stringifyFcmData = (raw: Record<string, unknown>): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        out[k] = typeof v === 'string' ? v : JSON.stringify(v);
+      }
+      return out;
+    };
+
+    const fcmData: Record<string, string> = {
+      ...stringifyFcmData(dataPayload),
       template,
       url: (dataPayload.url as string) || '/',
       click_action: (dataPayload.url as string) || '/',

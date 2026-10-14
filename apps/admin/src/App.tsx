@@ -14,10 +14,11 @@ import {
   adminLiftBidBan,
   adminResolveDispute,
   fetchSettings,
-  fetchInAppNotifications,
-  subscribeToInAppNotifications,
   fetchAllCategories,
   adminUpdateCategory,
+  adminUpdateSetting,
+  adminUpdateUser,
+  adminUpdateProvider,
   adminFetchUsers,
   adminFetchCoinLedger,
   fetchRevenue,
@@ -28,6 +29,19 @@ import {
   fetchDisputeMessages,
   sendDisputeMessage,
   subscribeToDisputeMessages,
+  fetchInAppNotifications,
+  subscribeToInAppNotifications,
+  adminGetDemoMode,
+  adminSetDemoMode,
+  adminGetAllowEarlyFinish,
+  adminSetAllowEarlyFinish,
+  adminGetImmediateAuction,
+  adminSetImmediateAuction,
+  adminFinishAuctionNow,
+  isValidEmail,
+  sendConfirmationEmail,
+  getBookingEmailDetails,
+  generateBookingConfirmationEmail,
   supabase,
   type ServiceRequest,
   type AdminUserRow,
@@ -42,6 +56,7 @@ import {
   Users, CheckCircle, XCircle, Lock, Unlock, TrendingUp,
   MessageSquare, Activity, FileText, Eye, EyeOff, Image as ImageIcon,
   DollarSign, BarChart2, Tag, UserCheck, Send, X, ChevronDown, ChevronUp,
+  Flag, Gavel,
 } from 'lucide-react';
 
 // ─── Shared tiny components ───────────────────────────────────────────────────
@@ -89,51 +104,93 @@ const modalBox: React.CSSProperties = {
   padding: '24px', width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto',
 };
 
+// ─── Demo-mode banner (shown when VITE_DEMO_MODE=true) ──────────────────────
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+
+const DemoBanner: React.FC = () => (
+  <div style={{
+    position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
+    backgroundColor: '#92400e', color: '#fef3c7',
+    padding: '6px 16px', fontSize: '0.78rem', fontWeight: 700,
+    textAlign: 'center', letterSpacing: '0.03em',
+  }}>
+    Demo mode: no login required. Do not use with real data.
+  </div>
+);
+
 // ─── Main AdminAppContent ─────────────────────────────────────────────────────
 const AdminAppContent: React.FC = () => {
   const { authUser, profile, signInWithEmail, signOut } = useAuth();
 
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError]     = useState('');
+  // ── Auto-sign-in on mount: authenticate admin session silently ─────────────
+  useEffect(() => {
+    if (!authUser || profile?.role !== 'admin') {
+      const demoEmail = import.meta.env.VITE_DEMO_ADMIN_EMAIL || 'admin@demo.urbanclap.test';
+      const demoPassword = import.meta.env.VITE_DEMO_ADMIN_PASSWORD || 'HC@Demo2026';
+      if (demoEmail && demoPassword) {
+        signInWithEmail(demoEmail, demoPassword).catch(console.warn);
+      }
+    }
+  }, [authUser, profile?.role, signInWithEmail]);
 
   type TabId = 'metrics' | 'emergency' | 'providers' | 'users' | 'settings'
-             | 'disputes' | 'verification' | 'categories' | 'revenue';
+    | 'disputes' | 'verification' | 'categories' | 'revenue';
 
   const [activeTab, setActiveTab] = useState<TabId>('metrics');
 
+  // ── Demo Mode state ────────────────────────────────────────────────────────
+  const [demoModeEnabled, setDemoModeEnabled] = useState<boolean | null>(null); // null = loading
+  const [demoModeLoading, setDemoModeLoading] = useState(false);
+  const [demoDeleteConfirm, setDemoDeleteConfirm] = useState('');
+  const [demoDeleteLoading, setDemoDeleteLoading] = useState(false);
+
+  // ── Early Finish Toggle ────────────────────────────────────────────────────
+  const [allowEarlyFinish, setAllowEarlyFinish] = useState<boolean | null>(null);
+  const [earlyFinishLoading, setEarlyFinishLoading] = useState(false);
+
+  // ── Immediate Auction Toggle ───────────────────────────────────────────────
+  const [immediateAuction, setImmediateAuction] = useState<boolean | null>(null);
+  const [immediateAuctionLoading, setImmediateAuctionLoading] = useState(false);
+
   // Core data
-  const [metrics,          setMetrics]          = useState<Record<string, number | null>>({});
-  const [requests,         setRequests]         = useState<ServiceRequest[]>([]);
-  const [providers,        setProviders]        = useState<any[]>([]);
-  const [pendingProviders, setPending]          = useState<any[]>([]);
-  const [settingsList,     setSettingsList]     = useState<any[]>([]);
-  const [disputes,         setDisputesList]     = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<Record<string, number | null>>({});
+  const [requests, setRequests] = useState<ServiceRequest[]>([]);
+  const [providers, setProviders] = useState<any[]>([]);
+  const [pendingProviders, setPending] = useState<any[]>([]);
+  const [settingsList, setSettingsList] = useState<any[]>([]);
+  const [disputes, setDisputesList] = useState<any[]>([]);
   // New
-  const [users,            setUsers]            = useState<AdminUserRow[]>([]);
-  const [categories,       setCategories]       = useState<any[]>([]);
-  const [revenue,          setRevenue]          = useState<RevenueRow[]>([]);
-  const [revPeriod,        setRevPeriod]        = useState<'day' | 'week' | 'month'>('day');
-  const [verification,     setVerification]     = useState<VerificationRequest[]>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  const [revenue, setRevenue] = useState<RevenueRow[]>([]);
+  const [revPeriod, setRevPeriod] = useState<'day' | 'week' | 'month'>('day');
+  const [verification, setVerification] = useState<VerificationRequest[]>([]);
 
   // UI states
-  const [editingSetting,  setEditingSetting]   = useState<{ key: string; value: string } | null>(null);
-  const [resolveTarget,   setResolveTarget]    = useState<{ id: string; resolution: string; favor: 'customer' | 'provider' | 'neutral' } | null>(null);
-  const [actionMsg,       setActionMsg]        = useState<{ type: 'error' | 'success'; text: string } | null>(null);
-  const [loading,         setLoading]          = useState(false);
+  const [editingSetting, setEditingSetting] = useState<{
+    key: string;
+    original: any;
+    valType: 'number' | 'boolean' | 'string' | 'json';
+    inputVal: string;
+    boolVal: boolean;
+  } | null>(null);
+  const [editUser, setEditUser] = useState<AdminUserRow | null>(null);
+  const [editProv, setEditProv] = useState<any | null>(null);
+  const [resolveTarget, setResolveTarget] = useState<{ id: string; resolution: string; favor: 'customer' | 'provider' | 'neutral' } | null>(null);
+  const [actionMsg, setActionMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [loading, setLoading] = useState(false);
 
   // Users tab
-  const [ledgerUser,      setLedgerUser]       = useState<AdminUserRow | null>(null);
-  const [ledger,          setLedger]           = useState<AdminCoinLedgerEntry[]>([]);
-  const [ledgerLoading,   setLedgerLoading]    = useState(false);
-  const [userFilter,      setUserFilter]       = useState('');
+  const [ledgerUser, setLedgerUser] = useState<AdminUserRow | null>(null);
+  const [ledger, setLedger] = useState<AdminCoinLedgerEntry[]>([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [userFilter, setUserFilter] = useState('');
 
   // Dispute chat
-  const [chatDisputeId,   setChatDisputeId]    = useState<string | null>(null);
-  const [chatMessages,    setChatMessages]     = useState<DisputeMessage[]>([]);
-  const [chatInput,       setChatInput]        = useState('');
-  const [chatImage,       setChatImage]        = useState('');
+  const [chatDisputeId, setChatDisputeId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<DisputeMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatImage, setChatImage] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Categories edit
@@ -143,7 +200,7 @@ const AdminAppContent: React.FC = () => {
   const [newFee, setNewFee] = useState('');
 
   // Notifications
-  const [inboxOpen,         setInboxOpen]         = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
 
   // Legal page overlay
@@ -207,15 +264,178 @@ const AdminAppContent: React.FC = () => {
     } catch (e: any) { console.warn(e.message); }
   }, []);
 
-  useEffect(() => {
-    if (authUser?.id && profile?.role === 'admin') {
-      loadData();
-      loadUsers();
-      loadCategories();
-      loadRevenue(revPeriod);
-      loadVerification();
+  // ── Load demo mode state ──────────────────────────────────────────────────
+  const loadDemoMode = useCallback(async () => {
+    try {
+      const { enabled } = await adminGetDemoMode();
+      setDemoModeEnabled(enabled);
+    } catch { setDemoModeEnabled(false); }
+  }, []);
+
+  // ── Load early finish toggle ──────────────────────────────────────────────
+  const loadEarlyFinish = useCallback(async () => {
+    try {
+      const { enabled } = await adminGetAllowEarlyFinish();
+      setAllowEarlyFinish(enabled);
+    } catch { setAllowEarlyFinish(false); }
+  }, []);
+
+  // ── Load immediate auction toggle ─────────────────────────────────────────
+  const loadImmediateAuction = useCallback(async () => {
+    try {
+      const { enabled } = await adminGetImmediateAuction();
+      setImmediateAuction(enabled);
+    } catch { setImmediateAuction(false); }
+  }, []);
+
+  const handleToggleDemoMode = async (val: boolean) => {
+    setDemoModeLoading(true);
+    try {
+      await adminSetDemoMode(val);
+      setDemoModeEnabled(val);
+      showMsg('success', `Sample activity ${val ? 'ON — sample data is now visible' : 'OFF — sample data is hidden from all apps'}`);
+      // Refresh all data so counts reflect the new state
+      await loadData();
+      await loadUsers();
+    } catch (err: any) {
+      showMsg('error', err.message || 'Failed to toggle sample activity');
+    } finally {
+      setDemoModeLoading(false);
     }
+  };
+
+  const handleToggleEarlyFinish = async (val: boolean) => {
+    setEarlyFinishLoading(true);
+    try {
+      await adminSetAllowEarlyFinish(val);
+      setAllowEarlyFinish(val);
+      showMsg('success', `Early Finish ${val ? 'ON — customers & providers can finish jobs anytime' : 'OFF — finish button follows scheduled time'}`);
+    } catch (err: any) {
+      showMsg('error', err.message || 'Failed to toggle early finish');
+    } finally {
+      setEarlyFinishLoading(false);
+    }
+  };
+
+  const handleToggleImmediateAuction = async (val: boolean) => {
+    setImmediateAuctionLoading(true);
+    try {
+      await adminSetImmediateAuction(val);
+      setImmediateAuction(val);
+      showMsg('success', `Immediate Auction ${val ? 'ON — you can now force-finish any active auction' : 'OFF — auctions follow normal rules'}`);
+    } catch (err: any) {
+      showMsg('error', err.message || 'Failed to toggle immediate auction');
+    } finally {
+      setImmediateAuctionLoading(false);
+    }
+  };
+
+  const handleFinishAuctionNow = async (reqId: string) => {
+    if (!confirm('Force-finish this auction and award to the highest bidder?')) return;
+    try {
+      const res = await adminFinishAuctionNow(reqId);
+      if (res.success) {
+        showMsg('success', res.message || `Auction finished! Awarded to provider with ${res.winning_coins ?? 0} coins.`);
+        try {
+          const details = await getBookingEmailDetails({ requestId: reqId });
+          if (details?.customer?.email && isValidEmail(details.customer.email)) {
+            const custEmail = generateBookingConfirmationEmail({
+              bookingId: details.booking_id || reqId,
+              requestId: reqId,
+              recipientRole: 'customer',
+              recipientName: details.customer.name,
+              otherPartyName: details.provider?.name || 'Technician',
+              otherPartyPhone: details.provider?.phone || '--',
+              title: details.title,
+              categoryName: details.category_name,
+              scheduledTime: details.scheduled_time || new Date().toISOString(),
+              address: details.address || 'On file',
+              price: details.price || 0,
+            });
+            sendConfirmationEmail({
+              userId: details.customer.id,
+              email: details.customer.email,
+              recipientName: details.customer.name,
+              recipientRole: 'customer',
+              emailType: 'booking_confirmation',
+              subject: custEmail.subject,
+              bodyText: custEmail.bodyText,
+              bodyHtml: custEmail.bodyHtml,
+              requestId: reqId,
+              bookingId: details.booking_id,
+            }).catch(console.warn);
+          }
+          if (details?.provider?.email && isValidEmail(details.provider.email)) {
+            const provEmail = generateBookingConfirmationEmail({
+              bookingId: details.booking_id || reqId,
+              requestId: reqId,
+              recipientRole: 'provider',
+              recipientName: details.provider.name,
+              otherPartyName: details.customer?.name || 'Customer',
+              otherPartyPhone: details.customer?.phone || '--',
+              title: details.title,
+              categoryName: details.category_name,
+              scheduledTime: details.scheduled_time || new Date().toISOString(),
+              address: details.address || 'On file',
+              price: details.price || 0,
+            });
+            sendConfirmationEmail({
+              userId: details.provider.user_id,
+              email: details.provider.email,
+              recipientName: details.provider.name,
+              recipientRole: 'provider',
+              emailType: 'booking_confirmation',
+              subject: provEmail.subject,
+              bodyText: provEmail.bodyText,
+              bodyHtml: provEmail.bodyHtml,
+              requestId: reqId,
+              bookingId: details.booking_id,
+            }).catch(console.warn);
+          }
+        } catch (emailErr) {
+          console.warn('Admin finish auction email dispatch error:', emailErr);
+        }
+      } else {
+        showMsg('error', res.error || 'Failed to finish auction');
+      }
+      await loadData();
+    } catch (err: any) {
+      showMsg('error', err.message || 'Failed to finish auction');
+    }
+  };
+
+  const handleDeleteDemoData = async () => {
+    if (demoDeleteConfirm.trim() !== 'DELETE SAMPLE DATA') {
+      showMsg('error', 'Type DELETE SAMPLE DATA to confirm permanent deletion.');
+      return;
+    }
+
+    setDemoDeleteLoading(true);
+    try {
+      await supabase.rpc('delete_demo_data');
+      showMsg('success', 'Sample data permanently deleted.');
+      setDemoDeleteConfirm('');
+      await loadDemoMode();
+      await loadData();
+      await loadUsers();
+    } catch (err: any) {
+      showMsg('error', err.message || 'Failed to delete sample data');
+    } finally {
+      setDemoDeleteLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+    loadUsers();
+    loadCategories();
+    loadRevenue(revPeriod);
+    loadVerification();
+    loadDemoMode();
+    loadEarlyFinish();
+    loadImmediateAuction();
   }, [authUser?.id, profile?.role]);
+
 
   useEffect(() => {
     if (authUser?.id && profile?.role === 'admin') {
@@ -253,19 +473,7 @@ const AdminAppContent: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // ── Auth handlers ──────────────────────────────────────────────────────────
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoginLoading(true);
-    setLoginError('');
-    try {
-      await signInWithEmail(email.trim(), password);
-    } catch (err: any) {
-      setLoginError(err.message || 'Invalid administrator credentials.');
-    } finally {
-      setLoginLoading(false);
-    }
-  };
+
 
   // ── Emergency handlers ─────────────────────────────────────────────────────
   const handleForceStartBidding = async (reqId: string) => {
@@ -301,22 +509,109 @@ const AdminAppContent: React.FC = () => {
     } catch (err: any) { showMsg('error', err.message || 'Failed'); }
   };
 
+  // ── Helper to format setting display ───────────────────────────────────────
+  const formatSettingDisplay = (val: any) => {
+    if (val === null || val === undefined) return '--';
+    if (typeof val === 'object' && 'value' in val) {
+      if (typeof val.value === 'boolean') return val.value ? 'true (enabled)' : 'false (disabled)';
+      if (typeof val.value === 'object') return JSON.stringify(val.value);
+      return String(val.value);
+    }
+    if (typeof val === 'object' && 'enabled' in val) {
+      return val.enabled ? 'true (enabled)' : 'false (disabled)';
+    }
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val);
+  };
+
+  // ── Open Edit Setting ───────────────────────────────────────────────────────
+  const openEditSetting = (s: { key: string; value: any }) => {
+    const orig = s.value;
+    let valType: 'number' | 'boolean' | 'string' | 'json' = 'string';
+    let inputVal = '';
+    let boolVal = false;
+
+    if (orig && typeof orig === 'object' && 'value' in orig) {
+      const inner = orig.value;
+      if (typeof inner === 'number') {
+        valType = 'number';
+        inputVal = String(inner);
+      } else if (typeof inner === 'boolean') {
+        valType = 'boolean';
+        boolVal = inner;
+      } else if (typeof inner === 'string') {
+        valType = 'string';
+        inputVal = inner;
+      } else {
+        valType = 'json';
+        inputVal = JSON.stringify(inner, null, 2);
+      }
+    } else if (orig && typeof orig === 'object' && 'enabled' in orig) {
+      valType = 'boolean';
+      boolVal = !!orig.enabled;
+    } else if (typeof orig === 'number') {
+      valType = 'number';
+      inputVal = String(orig);
+    } else if (typeof orig === 'boolean') {
+      valType = 'boolean';
+      boolVal = orig;
+    } else if (typeof orig === 'string') {
+      valType = 'string';
+      inputVal = orig;
+    } else {
+      valType = 'json';
+      inputVal = JSON.stringify(orig, null, 2);
+    }
+
+    setEditingSetting({
+      key: s.key,
+      original: orig,
+      valType,
+      inputVal,
+      boolVal,
+    });
+  };
+
   // ── Settings handler ───────────────────────────────────────────────────────
   const handleSaveSetting = async () => {
     if (!editingSetting) return;
     try {
-      let parsedValue: any;
-      try { parsedValue = JSON.parse(editingSetting.value); }
-      catch { parsedValue = { value: parseFloat(editingSetting.value) || editingSetting.value }; }
-      const { error } = await supabase
-        .from('settings')
-        .update({ value: parsedValue, updated_by: authUser?.id, updated_at: new Date().toISOString() })
-        .eq('key', editingSetting.key);
-      if (error) throw error;
-      showMsg('success', `"${editingSetting.key}" updated and versioned.`);
+      let finalValue: any;
+      const { key, original, valType, inputVal, boolVal } = editingSetting;
+
+      if (original && typeof original === 'object' && 'enabled' in original) {
+        finalValue = { enabled: boolVal };
+      } else if (original && typeof original === 'object' && 'value' in original) {
+        if (valType === 'number') {
+          const num = parseFloat(inputVal);
+          if (isNaN(num)) throw new Error('Please enter a valid numeric value.');
+          finalValue = { value: num };
+        } else if (valType === 'boolean') {
+          finalValue = { value: boolVal };
+        } else if (valType === 'json') {
+          finalValue = { value: JSON.parse(inputVal) };
+        } else {
+          finalValue = { value: inputVal.trim() };
+        }
+      } else {
+        if (valType === 'number') {
+          const num = parseFloat(inputVal);
+          if (isNaN(num)) throw new Error('Please enter a valid numeric value.');
+          finalValue = { value: num };
+        } else if (valType === 'boolean') {
+          finalValue = { value: boolVal };
+        } else if (valType === 'json') {
+          finalValue = JSON.parse(inputVal);
+        } else {
+          finalValue = { value: inputVal.trim() };
+        }
+      }
+
+      await adminUpdateSetting(key, finalValue);
+      showMsg('success', `"${key}" updated and versioned.`);
       setEditingSetting(null);
       await loadData();
-    } catch (err: any) { showMsg('error', err.message || 'Failed'); }
+    } catch (err: any) { showMsg('error', err.message || 'Failed to update setting'); }
   };
 
   // ── Dispute handler ────────────────────────────────────────────────────────
@@ -358,14 +653,55 @@ const AdminAppContent: React.FC = () => {
     try {
       await adminUpdateCategory({
         categoryId: editCat.id,
-        name:       editCat.name,
-        basePrice:  parseFloat(editCat.base_price),
-        imageUrl:   editCat.image_url || undefined,
-        active:     editCat.active,
+        name: editCat.name.trim(),
+        basePrice: Number(editCat.base_price ?? 0),
+        imageUrl: (editCat.default_image ?? editCat.image_url ?? '').trim() || undefined,
+        active: editCat.active,
+        description: editCat.description?.trim() || undefined,
+        nameTa: editCat.name_ta?.trim() || undefined,
       });
-      showMsg('success', 'Category updated.');
+      showMsg('success', `Category "${editCat.name}" updated successfully.`);
       setEditCat(null);
       await loadCategories();
+    } catch (err: any) { showMsg('error', err.message); }
+  };
+
+  // ── User handler ───────────────────────────────────────────────────────────
+  const handleSaveUser = async () => {
+    if (!editUser) return;
+    try {
+      await adminUpdateUser({
+        userId: editUser.user_id,
+        name: editUser.name?.trim(),
+        phone: editUser.phone?.trim(),
+        role: editUser.role,
+        status: (editUser as any).status || 'active',
+        rating: editUser.rating_avg !== null && editUser.rating_avg !== undefined ? Number(editUser.rating_avg) : undefined,
+        coins: editUser.coins !== null && editUser.coins !== undefined ? Number(editUser.coins) : undefined,
+      });
+      showMsg('success', `User updated successfully.`);
+      setEditUser(null);
+      await loadUsers();
+    } catch (err: any) { showMsg('error', err.message); }
+  };
+
+  // ── Provider handler ───────────────────────────────────────────────────────
+  const handleSaveProv = async () => {
+    if (!editProv) return;
+    try {
+      await adminUpdateProvider({
+        providerProfileId: editProv.id,
+        name: editProv.profile?.name?.trim(),
+        phone: editProv.profile?.phone?.trim(),
+        providerType: editProv.provider_type,
+        experience: editProv.experience !== null && editProv.experience !== undefined ? Number(editProv.experience) : undefined,
+        status: editProv.status,
+        rating: editProv.rating_avg !== null && editProv.rating_avg !== undefined ? Number(editProv.rating_avg) : undefined,
+        coins: editProv.coins !== null && editProv.coins !== undefined ? Number(editProv.coins) : undefined,
+      });
+      showMsg('success', `Provider updated.`);
+      setEditProv(null);
+      await loadData();
     } catch (err: any) { showMsg('error', err.message); }
   };
 
@@ -394,33 +730,34 @@ const AdminAppContent: React.FC = () => {
   };
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const isAdmin           = profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin';
   const emergencyRequests = requests.filter(r => r.type === 'emergency');
-  const bannedProviders   = providers.filter((p: any) => p.bid_banned_until && new Date(p.bid_banned_until) > new Date());
-  const openDisputes      = disputes.filter((d: any) => d.status === 'open');
-  const pendingVerif      = verification.filter(v => v.status === 'pending');
-  const filteredUsers     = users.filter(u =>
+  const bannedProviders = providers.filter((p: any) => p.bid_banned_until && new Date(p.bid_banned_until) > new Date());
+  const openDisputes = disputes.filter((d: any) => d.status === 'open');
+  const pendingVerif = verification.filter(v => v.status === 'pending');
+  const filteredUsers = users.filter(u =>
     !userFilter || u.name?.toLowerCase().includes(userFilter.toLowerCase()) ||
     u.email?.toLowerCase().includes(userFilter.toLowerCase()) ||
     u.phone?.includes(userFilter)
   );
 
   const tabs: { id: TabId; icon: React.ReactNode; label: string }[] = [
-    { id: 'metrics',      icon: <Activity size={15} />,     label: 'Metrics' },
-    { id: 'emergency',    icon: <Zap size={15} />,          label: `Emergency (${emergencyRequests.length})` },
-    { id: 'providers',    icon: <UserCheck size={15} />,    label: `Providers (${pendingProviders.length} pending)` },
-    { id: 'users',        icon: <Users size={15} />,        label: `Users (${users.length})` },
-    { id: 'verification', icon: <Eye size={15} />,          label: `Verification (${pendingVerif.length})` },
-    { id: 'disputes',     icon: <AlertCircle size={15} />,  label: `Disputes (${openDisputes.length})` },
-    { id: 'categories',   icon: <Tag size={15} />,          label: 'Categories' },
-    { id: 'revenue',      icon: <BarChart2 size={15} />,    label: 'Revenue' },
-    { id: 'settings',     icon: <SettingsIcon size={15} />, label: `Settings (${settingsList.length})` },
+    { id: 'metrics', icon: <Activity size={15} />, label: 'Metrics' },
+    { id: 'emergency', icon: <Zap size={15} />, label: `Emergency (${emergencyRequests.length})` },
+    { id: 'providers', icon: <UserCheck size={15} />, label: `Providers (${pendingProviders.length} pending)` },
+    { id: 'users', icon: <Users size={15} />, label: `Users (${users.length})` },
+    { id: 'verification', icon: <Eye size={15} />, label: `Verification (${pendingVerif.length})` },
+    { id: 'disputes', icon: <AlertCircle size={15} />, label: `Disputes (${openDisputes.length})` },
+    { id: 'categories', icon: <Tag size={15} />, label: 'Categories' },
+    { id: 'revenue', icon: <BarChart2 size={15} />, label: 'Revenue' },
+    { id: 'settings', icon: <SettingsIcon size={15} />, label: `Settings (${settingsList.length})` },
   ];
 
   // ── RENDER: Legal page overlay ────────────────────────────────────────────
   if (legalPage) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        {DEMO_MODE && <DemoBanner />}
         <Navbar brandSubtitle="Admin Console" onOpenNotifications={() => setInboxOpen(true)} unreadNotificationsCount={unreadNotifsCount} />
         <div style={{ maxWidth: '900px', margin: '0 auto', width: '100%', padding: '0 16px' }}>
           <button
@@ -436,73 +773,12 @@ const AdminAppContent: React.FC = () => {
     );
   }
 
-  // ── RENDER: Unauthenticated ────────────────────────────────────────────────
-  if (!authUser) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <Navbar brandSubtitle="Admin Console" />
-        <main style={{ maxWidth: '440px', width: '100%', margin: '56px auto', padding: '0 16px' }}>
-          <Card>
-            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-              <div style={{ width: '52px', height: '52px', borderRadius: '10px', backgroundColor: 'var(--color-dark)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '12px' }}>
-                <Shield size={28} />
-              </div>
-              <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--color-teal-dark)' }}>Admin Console Sign In</h1>
-              <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', marginTop: '4px' }}>Super · Support · Finance roles</p>
-            </div>
-            {loginError && (
-              <div style={{ backgroundColor: '#fee2e2', border: '2px solid #ef4444', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px', color: '#991b1b', fontSize: '0.85rem' }}>
-                <AlertCircle size={16} /><span>{loginError}</span>
-              </div>
-            )}
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '4px' }}>Admin Email</label>
-                <input id="admin-email" type="email" className="flat-input" value={email} onChange={e => setEmail(e.target.value)} placeholder="admin@homecrew.in" required />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, marginBottom: '4px' }}>Password</label>
-                <input id="admin-password" type="password" className="flat-input" value={password} onChange={e => setPassword(e.target.value)} placeholder="password" required />
-              </div>
-              <Button id="admin-login-btn" type="submit" variant="primary" disabled={loginLoading} style={{ width: '100%' }}>
-                {loginLoading ? 'Signing in...' : 'Sign In as Administrator'}
-              </Button>
-            </form>
-          </Card>
-        </main>
-        <AppFooter onPrivacy={() => setLegalPage('privacy')} onTerms={() => setLegalPage('terms')} />
-      </div>
-    );
-  }
-
-
-  // ── RENDER: Not admin ──────────────────────────────────────────────────────
-  if (!isAdmin) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <Navbar brandSubtitle="Admin Console" />
-        <main style={{ maxWidth: '480px', margin: '60px auto', padding: '0 16px' }}>
-          <Card>
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-              <AlertCircle size={40} color="#dc2626" style={{ margin: '0 auto 12px' }} />
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#dc2626' }}>Access Denied</h2>
-              <p style={{ fontSize: '0.9rem', color: 'var(--color-muted)', margin: '8px 0 20px' }}>
-                Account ({authUser.email}) does not have admin privileges.
-              </p>
-              <Button id="admin-signout-btn" variant="secondary" onClick={signOut}>Sign Out</Button>
-            </div>
-          </Card>
-        </main>
-      </div>
-    );
-  }
-
-  // ── RENDER: Admin dashboard ────────────────────────────────────────────────
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {DEMO_MODE && <DemoBanner />}
       <Navbar brandSubtitle="Admin Console" onOpenNotifications={() => setInboxOpen(true)} unreadNotificationsCount={unreadNotifsCount} />
 
-      <main style={{ maxWidth: '1400px', width: '100%', margin: '0 auto', padding: '24px 16px', flex: 1 }}>
+      <main style={{ maxWidth: '1400px', width: '100%', margin: '0 auto', padding: `${DEMO_MODE ? '60px' : '24px'} 16px 24px`, flex: 1 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
           {/* Header banner */}
@@ -514,17 +790,140 @@ const AdminAppContent: React.FC = () => {
               <div>
                 <h1 style={{ fontSize: '1.45rem', fontWeight: 800 }}>HomeCrew Operations Console</h1>
                 <p style={{ color: '#cde8ed', fontSize: '0.85rem', marginTop: '2px' }}>
-                  {profile?.name ?? authUser.email} · {(profile as any)?.admin_role?.toUpperCase() ?? 'ADMIN'}
+                  Admin · Operations Dashboard
                 </p>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* ── Demo Mode Toggle ── */}
+              <div id="admin-demo-mode-widget" style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: demoModeEnabled ? 'rgba(234,179,8,0.18)' : 'rgba(0,0,0,0.15)',
+                border: `2px solid ${demoModeEnabled ? '#ca8a04' : 'rgba(255,255,255,0.25)'}`,
+                borderRadius: '10px', padding: '6px 12px',
+                transition: 'all 0.2s',
+              }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: demoModeEnabled ? '#fef08a' : '#cbd5e1', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                  {demoModeEnabled === null ? '…' : demoModeEnabled ? '🟡 SAMPLE ON' : '⚫ SAMPLE OFF'}
+                </span>
+                <button
+                  id="admin-demo-toggle-btn"
+                  disabled={demoModeLoading || demoModeEnabled === null}
+                  onClick={() => handleToggleDemoMode(!demoModeEnabled)}
+                  style={{
+                    position: 'relative', width: '40px', height: '22px',
+                    borderRadius: '11px', border: 'none', cursor: 'pointer',
+                    background: demoModeEnabled ? '#ca8a04' : '#475569',
+                    transition: 'background 0.2s',
+                    flexShrink: 0,
+                    opacity: demoModeLoading ? 0.6 : 1,
+                  }}
+                  aria-label={demoModeEnabled ? 'Disable Demo Mode' : 'Enable Demo Mode'}
+                  aria-pressed={!!demoModeEnabled}
+                >
+                  <span style={{
+                    position: 'absolute', top: '3px',
+                    left: demoModeEnabled ? '21px' : '3px',
+                    width: '16px', height: '16px', borderRadius: '50%',
+                    background: '#fff', transition: 'left 0.2s',
+                  }} />
+                </button>
+              </div>
+              {/* ── Early Finish Toggle ── */}
+              <div id="admin-early-finish-widget" style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: allowEarlyFinish ? 'rgba(16,185,129,0.18)' : 'rgba(0,0,0,0.15)',
+                border: `2px solid ${allowEarlyFinish ? '#059669' : 'rgba(255,255,255,0.25)'}`,
+                borderRadius: '10px', padding: '6px 12px',
+                transition: 'all 0.2s',
+              }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: allowEarlyFinish ? '#6ee7b7' : '#cbd5e1', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                  {allowEarlyFinish === null ? '…' : allowEarlyFinish ? '🏁 FINISH BTN ON' : '🏁 FINISH BTN OFF'}
+                </span>
+                <button
+                  id="admin-early-finish-toggle-btn"
+                  disabled={earlyFinishLoading || allowEarlyFinish === null}
+                  onClick={() => handleToggleEarlyFinish(!allowEarlyFinish)}
+                  style={{
+                    position: 'relative', width: '40px', height: '22px',
+                    borderRadius: '11px', border: 'none', cursor: 'pointer',
+                    background: allowEarlyFinish ? '#059669' : '#475569',
+                    transition: 'background 0.2s',
+                    flexShrink: 0,
+                    opacity: earlyFinishLoading ? 0.6 : 1,
+                  }}
+                  aria-label={allowEarlyFinish ? 'Disable Early Finish' : 'Enable Early Finish'}
+                  aria-pressed={!!allowEarlyFinish}
+                >
+                  <span style={{
+                    position: 'absolute', top: '3px',
+                    left: allowEarlyFinish ? '21px' : '3px',
+                    width: '16px', height: '16px', borderRadius: '50%',
+                    background: '#fff', transition: 'left 0.2s',
+                  }} />
+                </button>
+              </div>
+
+              {/* ── Immediate Auction Toggle ── */}
+              <div id="admin-immediate-auction-widget" style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                background: immediateAuction ? 'rgba(249,115,22,0.18)' : 'rgba(0,0,0,0.15)',
+                border: `2px solid ${immediateAuction ? '#ea580c' : 'rgba(255,255,255,0.25)'}`,
+                borderRadius: '10px', padding: '6px 12px',
+                transition: 'all 0.2s',
+              }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: immediateAuction ? '#fdba74' : '#cbd5e1', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+                  {immediateAuction === null ? '…' : immediateAuction ? '⚡ AUCTION FORCE ON' : '⚡ AUCTION NORMAL'}
+                </span>
+                <button
+                  id="admin-immediate-auction-toggle-btn"
+                  disabled={immediateAuctionLoading || immediateAuction === null}
+                  onClick={() => handleToggleImmediateAuction(!immediateAuction)}
+                  style={{
+                    position: 'relative', width: '40px', height: '22px',
+                    borderRadius: '11px', border: 'none', cursor: 'pointer',
+                    background: immediateAuction ? '#ea580c' : '#475569',
+                    transition: 'background 0.2s',
+                    flexShrink: 0,
+                    opacity: immediateAuctionLoading ? 0.6 : 1,
+                  }}
+                  aria-label={immediateAuction ? 'Disable Immediate Auction' : 'Enable Immediate Auction'}
+                  aria-pressed={!!immediateAuction}
+                >
+                  <span style={{
+                    position: 'absolute', top: '3px',
+                    left: immediateAuction ? '21px' : '3px',
+                    width: '16px', height: '16px', borderRadius: '50%',
+                    background: '#fff', transition: 'left 0.2s',
+                  }} />
+                </button>
+              </div>
+
               <Button id="admin-refresh-btn" size="sm" variant="secondary" onClick={loadData} disabled={loading}>
                 <RefreshCw size={14} /> {loading ? 'Loading…' : 'Refresh'}
               </Button>
-              <Button id="admin-signout-hdr-btn" size="sm" variant="secondary" onClick={signOut}>Sign Out</Button>
+              {/* Sign Out is hidden in demo mode */}
+              {!DEMO_MODE && (
+                <Button id="admin-signout-btn" size="sm" variant="secondary" onClick={signOut}>
+                  Sign Out
+                </Button>
+              )}
             </div>
           </div>
+
+          {/* Demo mode notification banner */}
+          {demoModeEnabled === true && (
+            <div style={{
+              padding: '10px 16px', borderRadius: '8px',
+              border: '2px solid #ca8a04', backgroundColor: '#fef9c3',
+              color: '#713f12', fontWeight: 700, fontSize: '0.85rem',
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}>
+              <EyeOff size={16} />
+              Demo Mode is <strong>ON</strong> — sample data is visible across all 3 apps.
+              Switch OFF to hide all demo records without deleting them.
+            </div>
+          )}
 
           {/* Action msg */}
           {actionMsg && (
@@ -555,29 +954,29 @@ const AdminAppContent: React.FC = () => {
           {activeTab === 'metrics' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px' }}>
-                <MetricTile label="Total Requests"       value={metrics.total_requests ?? 0} />
-                <MetricTile label="Open Ordinary Jobs"   value={metrics.open_ordinary ?? 0}      accent="var(--color-teal-dark)" />
-                <MetricTile label="Emergency Active"     value={metrics.emergency_active ?? 0}    accent="var(--color-terracotta)" />
-                <MetricTile label="Emergency Awarded"    value={metrics.emergency_awarded ?? 0}   accent="#16a34a" />
-                <MetricTile label="Emergency Failed"     value={metrics.emergency_failed ?? 0}    accent="#dc2626" />
-                <MetricTile label="Active Providers"     value={metrics.total_providers ?? 0}     accent="var(--color-teal-dark)" />
-                <MetricTile label="Pending Applications" value={metrics.pending_providers ?? 0}   accent="#d97706" />
-                <MetricTile label="Banned Providers"     value={metrics.banned_providers ?? 0}    accent="#dc2626" />
-                <MetricTile label="Coins Issued"         value={metrics.total_coins_issued ?? 0}  accent="var(--color-gold)" />
-                <MetricTile label="Open Disputes"        value={metrics.open_disputes ?? 0}       accent="#dc2626" />
+                <MetricTile label="Total Requests" value={metrics.total_requests ?? 0} />
+                <MetricTile label="Open Ordinary Jobs" value={metrics.open_ordinary ?? 0} accent="var(--color-teal-dark)" />
+                <MetricTile label="Emergency Active" value={metrics.emergency_active ?? 0} accent="var(--color-terracotta)" />
+                <MetricTile label="Emergency Awarded" value={metrics.emergency_awarded ?? 0} accent="#16a34a" />
+                <MetricTile label="Emergency Failed" value={metrics.emergency_failed ?? 0} accent="#dc2626" />
+                <MetricTile label="Active Providers" value={metrics.total_providers ?? 0} accent="var(--color-teal-dark)" />
+                <MetricTile label="Pending Applications" value={metrics.pending_providers ?? 0} accent="#d97706" />
+                <MetricTile label="Banned Providers" value={metrics.banned_providers ?? 0} accent="#dc2626" />
+                <MetricTile label="Coins Issued" value={metrics.total_coins_issued ?? 0} accent="var(--color-gold)" />
+                <MetricTile label="Open Disputes" value={metrics.open_disputes ?? 0} accent="#dc2626" />
                 <MetricTile label="Emergency Fee Revenue" value={`₹${metrics.emergency_fee_revenue ?? 0}`} accent="#16a34a" />
-                <MetricTile label="Confirmed Bookings"   value={metrics.total_bookings ?? 0}      accent="#16a34a" />
+                <MetricTile label="Confirmed Bookings" value={metrics.total_bookings ?? 0} accent="#16a34a" />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
                 <AdminDonutChart
                   title="Request Lifecycle Status"
                   data={[
-                    { label: 'Open Jobs',          value: metrics.open_ordinary ?? 0,                                        color: 'var(--color-primary)' },
-                    { label: 'Emergency Active',   value: metrics.emergency_active ?? 0,                                     color: 'var(--color-coral)' },
-                    { label: 'Confirmed Bookings', value: metrics.total_bookings ?? 0,                                       color: 'var(--color-emerald)' },
-                    { label: 'Awarded',            value: metrics.emergency_awarded ?? 0,                                    color: 'var(--color-indigo-dark)' },
-                    { label: 'Disputes / Failed',  value: (metrics.open_disputes ?? 0) + (metrics.emergency_failed ?? 0),   color: 'var(--color-crimson)' },
+                    { label: 'Open Jobs', value: metrics.open_ordinary ?? 0, color: 'var(--color-primary)' },
+                    { label: 'Emergency Active', value: metrics.emergency_active ?? 0, color: 'var(--color-coral)' },
+                    { label: 'Confirmed Bookings', value: metrics.total_bookings ?? 0, color: 'var(--color-emerald)' },
+                    { label: 'Awarded', value: metrics.emergency_awarded ?? 0, color: 'var(--color-indigo-dark)' },
+                    { label: 'Disputes / Failed', value: (metrics.open_disputes ?? 0) + (metrics.emergency_failed ?? 0), color: 'var(--color-crimson)' },
                   ]}
                 />
                 <AdminLineChart
@@ -605,7 +1004,14 @@ const AdminAppContent: React.FC = () => {
             <Card>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-teal-dark)' }}>Emergency Bidding Sessions</h2>
-                <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>{emergencyRequests.length} emergency requests</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {immediateAuction && (
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#f59e0b', background: '#fef3c7', border: '1.5px solid #f59e0b', borderRadius: '6px', padding: '3px 10px' }}>
+                      ⚡ Immediate Auction ON — Finish Auction button available
+                    </span>
+                  )}
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>{emergencyRequests.length} emergency requests</span>
+                </div>
               </div>
 
               {emergencyRequests.length === 0 ? (
@@ -631,6 +1037,12 @@ const AdminAppContent: React.FC = () => {
                             <Zap size={13} /> Force Start
                           </Button>
                         )}
+                        {/* Finish Auction Now — only shown when Immediate Auction toggle is ON */}
+                        {immediateAuction && !['cancelled', 'completed', 'awarded', 'assigned'].includes(req.status) && (
+                          <Button id={`admin-finish-auction-${req.id}`} size="sm" variant="primary" onClick={() => handleFinishAuctionNow(req.id)}>
+                            <Gavel size={13} /> Finish Auction
+                          </Button>
+                        )}
                         {!['cancelled', 'completed'].includes(req.status) && (
                           <Button id={`admin-cancel-bid-${req.id}`} size="sm" variant="secondary" onClick={() => handleCancelBidding(req.id)}>
                             Cancel
@@ -641,6 +1053,7 @@ const AdminAppContent: React.FC = () => {
                   ))}
                 </div>
               )}
+
             </Card>
           )}
 
@@ -727,6 +1140,7 @@ const AdminAppContent: React.FC = () => {
                         <th style={{ padding: '10px', textAlign: 'right' }}>Reviews</th>
                         <th style={{ padding: '10px', textAlign: 'right' }}>Coins</th>
                         <th style={{ padding: '10px', textAlign: 'left' }}>Joined</th>
+                        <th style={{ padding: '10px', textAlign: 'center' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -742,6 +1156,16 @@ const AdminAppContent: React.FC = () => {
                           <td style={{ padding: '10px', textAlign: 'right' }}>{prov.review_count}</td>
                           <td style={{ padding: '10px', textAlign: 'right', fontWeight: 700, color: 'var(--color-gold)' }}>{prov.coins ?? '--'}</td>
                           <td style={{ padding: '10px', color: 'var(--color-muted)', fontSize: '0.75rem' }}>{new Date(prov.created_at).toLocaleDateString()}</td>
+                          <td style={{ padding: '10px', textAlign: 'center' }}>
+                            <Button
+                              id={`admin-edit-provider-${prov.id}`}
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setEditProv({ ...prov })}
+                            >
+                              Edit
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -796,7 +1220,16 @@ const AdminAppContent: React.FC = () => {
                             : <span style={{ color: '#16a34a', fontSize: '0.75rem' }}>Clear</span>}
                         </td>
                         <td style={{ padding: '9px 10px', color: 'var(--color-muted)', fontSize: '0.75rem' }}>{new Date(u.created_at).toLocaleDateString()}</td>
-                        <td style={{ padding: '9px 10px', textAlign: 'center' }}>
+                        <td style={{ padding: '9px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <Button
+                            id={`admin-edit-user-${u.user_id}`}
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setEditUser({ ...u })}
+                            style={{ marginRight: '4px' }}
+                          >
+                            Edit
+                          </Button>
                           {u.provider_profile_id && (
                             <Button size="sm" variant="secondary" onClick={() => openLedger(u)}>Ledger</Button>
                           )}
@@ -961,8 +1394,8 @@ const AdminAppContent: React.FC = () => {
                     {categories.map((cat: any) => (
                       <tr key={cat.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '10px' }}>
-                          {cat.image_url
-                            ? <img src={cat.image_url} alt={cat.name} style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1.5px solid var(--color-border)' }} />
+                          {(cat.default_image ?? cat.image_url)
+                            ? <img src={cat.default_image ?? cat.image_url} alt={cat.name} style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', border: '1.5px solid var(--color-border)' }} />
                             : <div style={{ width: '40px', height: '40px', borderRadius: '6px', backgroundColor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ImageIcon size={16} color="var(--color-muted)" /></div>
                           }
                         </td>
@@ -974,7 +1407,20 @@ const AdminAppContent: React.FC = () => {
                           </span>
                         </td>
                         <td style={{ padding: '10px', textAlign: 'center' }}>
-                          <Button size="sm" variant="secondary" onClick={() => setEditCat({ ...cat })}>Edit</Button>
+                          <Button
+                            id={`admin-edit-category-${cat.id}`}
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setEditCat({
+                              ...cat,
+                              default_image: cat.default_image ?? cat.image_url ?? '',
+                              image_url: cat.default_image ?? cat.image_url ?? '',
+                              description: cat.description ?? '',
+                              name_ta: cat.name_ta ?? '',
+                            })}
+                          >
+                            Edit
+                          </Button>
                         </td>
                       </tr>
                     ))}
@@ -1089,57 +1535,218 @@ const AdminAppContent: React.FC = () => {
           {/* TAB: Settings                                                      */}
           {/* ═══════════════════════════════════════════════════════════════════ */}
           {activeTab === 'settings' && (
-            <Card>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-teal-dark)', marginBottom: '8px' }}>Business Settings</h2>
-              <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', marginBottom: '16px' }}>
-                Changes are versioned in settings_history and written to audit_log automatically.
-              </p>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--color-teal-dark)', backgroundColor: 'var(--bg-sand)' }}>
-                      <th style={{ padding: '10px', textAlign: 'left' }}>Key</th>
-                      <th style={{ padding: '10px', textAlign: 'left' }}>Current Value</th>
-                      <th style={{ padding: '10px', textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {settingsList.map((s: any) => (
-                      <tr key={s.key} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                        <td style={{ padding: '10px', fontWeight: 700, fontFamily: 'monospace', fontSize: '0.82rem' }}>{s.key}</td>
-                        <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--color-teal-dark)' }}>{JSON.stringify(s.value)}</td>
-                        <td style={{ padding: '10px', textAlign: 'right' }}>
-                          <Button id={`admin-edit-setting-${s.key}`} size="sm" variant="secondary" onClick={() => setEditingSetting({ key: s.key, value: JSON.stringify(s.value) })}>
-                            Edit
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-              {editingSetting && (
-                <div style={{ marginTop: '20px', padding: '16px', backgroundColor: 'var(--bg-sand)', border: '2px solid var(--color-teal-dark)', borderRadius: '8px' }}>
-                  <h3 style={{ fontSize: '0.95rem', fontWeight: 800, marginBottom: '8px' }}>
-                    Editing: <span style={{ fontFamily: 'monospace' }}>{editingSetting.key}</span>
-                  </h3>
-                  <input
-                    id={`admin-setting-input-${editingSetting.key}`}
-                    type="text"
-                    className="flat-input"
-                    value={editingSetting.value}
-                    onChange={e => setEditingSetting({ ...editingSetting, value: e.target.value })}
-                    style={{ marginBottom: '10px' }}
-                    placeholder='e.g. {"value": 50}'
-                  />
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <Button id="admin-save-setting-btn" size="sm" variant="primary" onClick={handleSaveSetting}>Save & Version</Button>
-                    <Button id="admin-cancel-setting-btn" size="sm" variant="secondary" onClick={() => setEditingSetting(null)}>Cancel</Button>
+              {/* ── Demo Mode Control Card ─────────────────────────────────── */}
+              <Card>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ flex: 1, minWidth: '260px' }}>
+                    <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-teal-dark)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <EyeOff size={18} /> Sample activity
+                    </h2>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', lineHeight: 1.6 }}>
+                      <strong>ON:</strong> Sample data (marked <code style={{ background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px' }}>is_demo=true</code>) is visible across all 3 apps — customer, provider, and admin — exactly like real data.<br />
+                      <strong>OFF:</strong> All demo records are hidden via database-level RLS policies. No real data is ever modified or deleted.<br />
+                      Re-enabling restores full demo visibility without creating duplicate records.
+                    </p>
+                    <p style={{ fontSize: '0.78rem', color: '#dc2626', fontWeight: 700, marginTop: '8px' }}>
+                      ⚠ Admin-only control. Demo credentials are never exposed in the app UI or client code.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', minWidth: '120px' }}>
+                    <div id="settings-demo-mode-widget" style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+                      padding: '16px 20px', borderRadius: '12px',
+                      border: `2px solid ${demoModeEnabled ? '#ca8a04' : 'var(--color-border)'}`,
+                      background: demoModeEnabled ? '#fef9c3' : '#f8fafc',
+                      transition: 'all 0.25s',
+                    }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: demoModeEnabled ? '#713f12' : 'var(--color-muted)', textTransform: 'uppercase' }}>
+                        {demoModeEnabled === null ? 'Loading…' : demoModeEnabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                      <button
+                        id="settings-demo-toggle-btn"
+                        disabled={demoModeLoading || demoModeEnabled === null}
+                        onClick={() => handleToggleDemoMode(!demoModeEnabled)}
+                        style={{
+                          position: 'relative', width: '52px', height: '28px',
+                          borderRadius: '14px', border: 'none', cursor: 'pointer',
+                          background: demoModeEnabled ? '#ca8a04' : '#cbd5e1',
+                          transition: 'background 0.25s',
+                          opacity: demoModeLoading ? 0.6 : 1,
+                        }}
+                        aria-label={demoModeEnabled ? 'Disable Demo Mode' : 'Enable Demo Mode'}
+                        aria-pressed={!!demoModeEnabled}
+                      >
+                        <span style={{
+                          position: 'absolute', top: '4px',
+                          left: demoModeEnabled ? '28px' : '4px',
+                          width: '20px', height: '20px', borderRadius: '50%',
+                          background: '#fff', transition: 'left 0.25s',
+                          boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                        }} />
+                      </button>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)', textAlign: 'center' }}>
+                        {demoModeLoading ? 'Saving…' : 'Click to toggle'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              )}
-            </Card>
+
+                {demoModeEnabled === false && (
+                  <div style={{ marginTop: '18px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '420px' }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        Delete sample data permanently
+                      </div>
+                      <input
+                        className="flat-input"
+                        value={demoDeleteConfirm}
+                        onChange={(e) => setDemoDeleteConfirm(e.target.value)}
+                        placeholder="Type DELETE SAMPLE DATA"
+                        aria-label="Type DELETE SAMPLE DATA to confirm permanent deletion"
+                      />
+                      <Button
+                        variant="red"
+                        onClick={handleDeleteDemoData}
+                        disabled={demoDeleteLoading}
+                        style={{ alignSelf: 'flex-start' }}
+                      >
+                        {demoDeleteLoading ? 'Deleting…' : 'Delete sample data permanently'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {/* ── Early Finish Control Card ──────────────────────────────── */}
+              <Card>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ flex: 1, minWidth: '240px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <CheckCircle size={18} color="var(--color-emerald)" />
+                      <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-teal-dark)', margin: 0 }}>
+                        Early Job Finish Control
+                      </h2>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0, lineHeight: 1.45 }}>
+                      When enabled (ON), a <strong>Finish</strong> button appears for both the customer and provider immediately after booking/posting, even before the scheduled date &amp; time. When clicked by both sides, the job completes immediately and review/feedback appears for both parties with zero delay. When disabled (OFF), all operations follow standard scheduled task timing.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 20px', borderRadius: '12px', border: `2px solid ${allowEarlyFinish ? '#059669' : 'var(--color-border)'}`, background: allowEarlyFinish ? '#ecfdf5' : '#f8fafc', minWidth: '120px' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: allowEarlyFinish ? '#065f46' : 'var(--color-muted)', textTransform: 'uppercase' }}>
+                      {allowEarlyFinish === null ? 'Loading…' : allowEarlyFinish ? 'Enabled' : 'Disabled'}
+                    </span>
+                    <button
+                      id="settings-early-finish-toggle-btn"
+                      disabled={earlyFinishLoading || allowEarlyFinish === null}
+                      onClick={() => handleToggleEarlyFinish(!allowEarlyFinish)}
+                      style={{
+                        position: 'relative', width: '52px', height: '28px',
+                        borderRadius: '14px', border: 'none', cursor: 'pointer',
+                        background: allowEarlyFinish ? '#059669' : '#cbd5e1',
+                        transition: 'background 0.25s',
+                        opacity: earlyFinishLoading ? 0.6 : 1,
+                      }}
+                      aria-label={allowEarlyFinish ? 'Disable Early Finish' : 'Enable Early Finish'}
+                      aria-pressed={!!allowEarlyFinish}
+                    >
+                      <span style={{
+                        position: 'absolute', top: '4px',
+                        left: allowEarlyFinish ? '28px' : '4px',
+                        width: '20px', height: '20px', borderRadius: '50%',
+                        background: '#fff', transition: 'left 0.25s',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                      }} />
+                    </button>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)', textAlign: 'center' }}>
+                      {earlyFinishLoading ? 'Saving…' : 'Click to toggle'}
+                    </span>
+                  </div>
+                </div>
+              </Card>
+
+              {/* ── Immediate Auction Control Card ─────────────────────────── */}
+              <Card>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                  <div style={{ flex: 1, minWidth: '240px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <Gavel size={18} color="var(--color-terracotta)" />
+                      <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-terracotta)', margin: 0 }}>
+                        Immediate Auction / Force Finish Override
+                      </h2>
+                    </div>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--color-muted)', margin: 0, lineHeight: 1.45 }}>
+                      When enabled (ON), administrators can force-finish any active emergency auction immediately using the <strong>Finish Auction</strong> button, even if minimum participants have not joined or the 45-minute countdown has not elapsed. The highest active bidder wins the auction immediately.
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '16px 20px', borderRadius: '12px', border: `2px solid ${immediateAuction ? '#ea580c' : 'var(--color-border)'}`, background: immediateAuction ? '#fff7ed' : '#f8fafc', minWidth: '120px' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: immediateAuction ? '#9a3412' : 'var(--color-muted)', textTransform: 'uppercase' }}>
+                      {immediateAuction === null ? 'Loading…' : immediateAuction ? 'Enabled' : 'Disabled'}
+                    </span>
+                    <button
+                      id="settings-immediate-auction-toggle-btn"
+                      disabled={immediateAuctionLoading || immediateAuction === null}
+                      onClick={() => handleToggleImmediateAuction(!immediateAuction)}
+                      style={{
+                        position: 'relative', width: '52px', height: '28px',
+                        borderRadius: '14px', border: 'none', cursor: 'pointer',
+                        background: immediateAuction ? '#ea580c' : '#cbd5e1',
+                        transition: 'background 0.25s',
+                        opacity: immediateAuctionLoading ? 0.6 : 1,
+                      }}
+                      aria-label={immediateAuction ? 'Disable Immediate Auction' : 'Enable Immediate Auction'}
+                      aria-pressed={!!immediateAuction}
+                    >
+                      <span style={{
+                        position: 'absolute', top: '4px',
+                        left: immediateAuction ? '28px' : '4px',
+                        width: '20px', height: '20px', borderRadius: '50%',
+                        background: '#fff', transition: 'left 0.25s',
+                        boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                      }} />
+                    </button>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--color-muted)', textAlign: 'center' }}>
+                      {immediateAuctionLoading ? 'Saving…' : 'Click to toggle'}
+                    </span>
+                  </div>
+                </div>
+              </Card>
+
+              {/* ── Business Settings ─────────────────────────────────────── */}
+              <Card>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-teal-dark)', marginBottom: '8px' }}>Business Settings</h2>
+                <p style={{ fontSize: '0.82rem', color: 'var(--color-muted)', marginBottom: '16px' }}>
+                  Changes are versioned in settings_history and written to audit_log automatically.
+                </p>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.86rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--color-teal-dark)', backgroundColor: 'var(--bg-sand)' }}>
+                        <th style={{ padding: '10px', textAlign: 'left' }}>Key</th>
+                        <th style={{ padding: '10px', textAlign: 'left' }}>Current Value</th>
+                        <th style={{ padding: '10px', textAlign: 'right' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {settingsList.map((s: any) => (
+                        <tr key={s.key} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '10px', fontWeight: 700, fontFamily: 'monospace', fontSize: '0.82rem' }}>{s.key}</td>
+                          <td style={{ padding: '10px', fontFamily: 'monospace', fontSize: '0.82rem', color: 'var(--color-teal-dark)' }}>
+                            {formatSettingDisplay(s.value)}
+                          </td>
+                          <td style={{ padding: '10px', textAlign: 'right' }}>
+                            <Button id={`admin-edit-setting-${s.key}`} size="sm" variant="secondary" onClick={() => openEditSetting(s)}>
+                              Edit
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
           )}
 
         </div>
@@ -1262,24 +1869,54 @@ const AdminAppContent: React.FC = () => {
       {/* Category Edit Modal */}
       {editCat && (
         <div style={overlayStyle}>
-          <div style={{ ...modalBox, maxWidth: '480px' }}>
+          <div style={{ ...modalBox, maxWidth: '520px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontWeight: 800, fontSize: '1.05rem' }}>Edit Category</h3>
+              <h3 style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-teal-dark)' }}>Edit Category</h3>
               <button onClick={() => setEditCat(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
-                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Name</label>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Name (English)</label>
                 <input className="flat-input" value={editCat.name} onChange={e => setEditCat({ ...editCat, name: e.target.value })} />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Name (Tamil - optional)</label>
+                <input className="flat-input" value={editCat.name_ta || ''} onChange={e => setEditCat({ ...editCat, name_ta: e.target.value })} placeholder="எ.கா. பிளம்பிங்" />
               </div>
               <div>
                 <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Base Price (₹)</label>
                 <input className="flat-input" type="number" min={0} value={editCat.base_price} onChange={e => setEditCat({ ...editCat, base_price: e.target.value })} />
               </div>
               <div>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Description</label>
+                <textarea
+                  className="flat-input"
+                  rows={2}
+                  value={editCat.description || ''}
+                  onChange={e => setEditCat({ ...editCat, description: e.target.value })}
+                  placeholder="Short description of this service category..."
+                />
+              </div>
+              <div>
                 <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Image URL</label>
-                <input className="flat-input" type="url" placeholder="https://…/image.jpg" value={editCat.image_url ?? ''} onChange={e => setEditCat({ ...editCat, image_url: e.target.value })} />
-                {editCat.image_url && <img src={editCat.image_url} alt="preview" style={{ marginTop: '8px', maxHeight: '80px', borderRadius: '6px', border: '1.5px solid var(--color-border)' }} />}
+                <input
+                  className="flat-input"
+                  type="url"
+                  placeholder="https://…/image.jpg"
+                  value={editCat.default_image ?? editCat.image_url ?? ''}
+                  onChange={e => setEditCat({
+                    ...editCat,
+                    default_image: e.target.value,
+                    image_url: e.target.value,
+                  })}
+                />
+                {(editCat.default_image ?? editCat.image_url) && (
+                  <img
+                    src={editCat.default_image ?? editCat.image_url}
+                    alt="preview"
+                    style={{ marginTop: '8px', maxHeight: '80px', borderRadius: '6px', border: '1.5px solid var(--color-border)', objectFit: 'cover' }}
+                  />
+                )}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <input type="checkbox" id="cat-active-chk" checked={editCat.active} onChange={e => setEditCat({ ...editCat, active: e.target.checked })} />
@@ -1288,7 +1925,259 @@ const AdminAppContent: React.FC = () => {
             </div>
             <div style={{ display: 'flex', gap: '10px', marginTop: '18px', justifyContent: 'flex-end' }}>
               <Button variant="secondary" onClick={() => setEditCat(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleSaveCat}>Save Changes</Button>
+              <Button id="admin-save-cat-btn" variant="primary" onClick={handleSaveCat}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Setting Edit Modal */}
+      {editingSetting && (
+        <div style={overlayStyle}>
+          <div style={{ ...modalBox, maxWidth: '500px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-teal-dark)' }}>
+                Edit Setting: <span style={{ fontFamily: 'monospace', color: 'var(--color-terracotta)' }}>{editingSetting.key}</span>
+              </h3>
+              <button onClick={() => setEditingSetting(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {editingSetting.valType === 'boolean' ? (
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '8px' }}>Toggle Value</label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      className={`btn-flat btn-flat-sm ${editingSetting.boolVal ? '' : 'btn-flat-secondary'}`}
+                      style={{ flex: 1, backgroundColor: editingSetting.boolVal ? '#16a34a' : undefined, color: editingSetting.boolVal ? '#fff' : undefined }}
+                      onClick={() => setEditingSetting({ ...editingSetting, boolVal: true })}
+                    >
+                      True / Enabled
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn-flat btn-flat-sm ${!editingSetting.boolVal ? '' : 'btn-flat-secondary'}`}
+                      style={{ flex: 1, backgroundColor: !editingSetting.boolVal ? '#dc2626' : undefined, color: !editingSetting.boolVal ? '#fff' : undefined }}
+                      onClick={() => setEditingSetting({ ...editingSetting, boolVal: false })}
+                    >
+                      False / Disabled
+                    </button>
+                  </div>
+                </div>
+              ) : editingSetting.valType === 'number' ? (
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Numeric Value</label>
+                  <input
+                    type="number"
+                    step="any"
+                    className="flat-input"
+                    value={editingSetting.inputVal}
+                    onChange={e => setEditingSetting({ ...editingSetting, inputVal: e.target.value })}
+                  />
+                </div>
+              ) : editingSetting.valType === 'json' ? (
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>JSON Configuration</label>
+                  <textarea
+                    rows={6}
+                    className="flat-input"
+                    style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}
+                    value={editingSetting.inputVal}
+                    onChange={e => setEditingSetting({ ...editingSetting, inputVal: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Setting Value</label>
+                  <input
+                    type="text"
+                    className="flat-input"
+                    value={editingSetting.inputVal}
+                    onChange={e => setEditingSetting({ ...editingSetting, inputVal: e.target.value })}
+                  />
+                </div>
+              )}
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)' }}>
+                Changes are versioned automatically and synchronized via realtime.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '18px', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => setEditingSetting(null)}>Cancel</Button>
+              <Button id="admin-save-setting-btn" variant="primary" onClick={handleSaveSetting}>Save & Version</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Edit Modal */}
+      {editUser && (
+        <div style={overlayStyle}>
+          <div style={{ ...modalBox, maxWidth: '480px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-teal-dark)' }}>
+                Edit User: <span style={{ color: 'var(--color-muted)' }}>{editUser.email}</span>
+              </h3>
+              <button onClick={() => setEditUser(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Full Name</label>
+                <input className="flat-input" value={editUser.name || ''} onChange={e => setEditUser({ ...editUser, name: e.target.value })} />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Phone Number</label>
+                <input className="flat-input" value={editUser.phone || ''} onChange={e => setEditUser({ ...editUser, phone: e.target.value })} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Role</label>
+                  <select
+                    className="flat-input"
+                    value={editUser.role}
+                    onChange={e => setEditUser({ ...editUser, role: e.target.value as any })}
+                  >
+                    <option value="customer">Customer</option>
+                    <option value="provider">Provider</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Status</label>
+                  <select
+                    className="flat-input"
+                    value={(editUser as any).status || 'active'}
+                    onChange={e => setEditUser({ ...editUser, status: e.target.value } as any)}
+                  >
+                    <option value="active">Active</option>
+                    <option value="suspended">Suspended</option>
+                    <option value="banned">Banned</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Rating (★)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="5"
+                    className="flat-input"
+                    value={editUser.rating_avg ?? ''}
+                    onChange={e => setEditUser({ ...editUser, rating_avg: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Coins Balance</label>
+                  <input
+                    type="number"
+                    className="flat-input"
+                    value={editUser.coins ?? ''}
+                    onChange={e => setEditUser({ ...editUser, coins: parseInt(e.target.value, 10) || 0 })}
+                  />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '18px', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => setEditUser(null)}>Cancel</Button>
+              <Button id="admin-save-user-btn" variant="primary" onClick={handleSaveUser}>Save Changes</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Provider Edit Modal */}
+      {editProv && (
+        <div style={overlayStyle}>
+          <div style={{ ...modalBox, maxWidth: '480px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--color-teal-dark)' }}>
+                Edit Provider: <span style={{ color: 'var(--color-muted)' }}>{editProv.profile?.name || editProv.profile?.email || 'Provider'}</span>
+              </h3>
+              <button onClick={() => setEditProv(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Provider Name</label>
+                <input
+                  className="flat-input"
+                  value={editProv.profile?.name || ''}
+                  onChange={e => setEditProv({ ...editProv, profile: { ...editProv.profile, name: e.target.value } })}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Phone Number</label>
+                <input
+                  className="flat-input"
+                  value={editProv.profile?.phone || ''}
+                  onChange={e => setEditProv({ ...editProv, profile: { ...editProv.profile, phone: e.target.value } })}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Provider Type</label>
+                  <select
+                    className="flat-input"
+                    value={editProv.provider_type || 'independent'}
+                    onChange={e => setEditProv({ ...editProv, provider_type: e.target.value })}
+                  >
+                    <option value="independent">Independent</option>
+                    <option value="agency_worker">Agency Worker</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Status</label>
+                  <select
+                    className="flat-input"
+                    value={editProv.status || 'active'}
+                    onChange={e => setEditProv({ ...editProv, status: e.target.value })}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="active">Active</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Exp (Yrs)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="flat-input"
+                    value={editProv.experience ?? 0}
+                    onChange={e => setEditProv({ ...editProv, experience: parseInt(e.target.value, 10) || 0 })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Rating (★)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="5"
+                    className="flat-input"
+                    value={editProv.rating_avg ?? ''}
+                    onChange={e => setEditProv({ ...editProv, rating_avg: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Coins</label>
+                  <input
+                    type="number"
+                    className="flat-input"
+                    value={editProv.coins ?? ''}
+                    onChange={e => setEditProv({ ...editProv, coins: parseInt(e.target.value, 10) || 0 })}
+                  />
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px', marginTop: '18px', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => setEditProv(null)}>Cancel</Button>
+              <Button id="admin-save-provider-btn" variant="primary" onClick={handleSaveProv}>Save Changes</Button>
             </div>
           </div>
         </div>
@@ -1301,12 +2190,12 @@ const AdminAppContent: React.FC = () => {
           onClose={() => { setInboxOpen(false); loadUnreadNotifs(); }}
           userId={authUser?.id || ''}
           onNavigate={(url: string) => {
-            if (url.includes('tab=disputes'))     setActiveTab('disputes');
+            if (url.includes('tab=disputes')) setActiveTab('disputes');
             else if (url.includes('tab=emergency')) setActiveTab('emergency');
             else if (url.includes('tab=providers')) setActiveTab('providers');
-            else if (url.includes('tab=settings'))  setActiveTab('settings');
-            else if (url.includes('tab=metrics'))   setActiveTab('metrics');
-            else if (url.includes('tab=revenue'))   setActiveTab('revenue');
+            else if (url.includes('tab=settings')) setActiveTab('settings');
+            else if (url.includes('tab=metrics')) setActiveTab('metrics');
+            else if (url.includes('tab=revenue')) setActiveTab('revenue');
             else if (url.includes('tab=verification')) setActiveTab('verification');
           }}
         />

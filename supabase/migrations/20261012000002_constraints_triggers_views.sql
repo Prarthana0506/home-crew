@@ -89,6 +89,10 @@ DECLARE
 BEGIN
     v_start_time := (NEW.preferred_start AT TIME ZONE 'Asia/Kolkata')::TIME;
 
+    IF NEW.preferred_start IS NULL THEN
+        RAISE EXCEPTION 'preferred_start is required for all service requests';
+    END IF;
+
     IF NEW.type = 'ordinary' THEN
         SELECT COALESCE((value->>'value')::TIME, '08:00:00'::TIME) INTO v_earliest
         FROM public.settings WHERE key = 'ordinary_start_time_earliest';

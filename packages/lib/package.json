@@ -6,7 +6,9 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.1",
+    "@supabase/supabase-js": "^2.49.1"
+  },
+  "peerDependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   }

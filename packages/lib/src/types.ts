@@ -198,7 +198,8 @@ export interface ServiceRequest {
   top_bid_coins?: number;
   top_bid_provider_profile_id?: string | null;
   current_radius_km?: number;
-  fallback_stage?: number;
+  customer_marked_finished?: boolean;
+  provider_marked_finished?: boolean;
   customer?: Profile | null;
   category?: ServiceCategory | null;
   area?: Area | null;
@@ -322,4 +323,46 @@ export interface CreateRequestResult {
   min_price: number;
   offered_price: number;
   type: ServiceType;
+}
+
+export interface SentEmail {
+  id: string;
+  recipient_email: string;
+  recipient_name?: string | null;
+  recipient_role: 'customer' | 'provider' | 'admin';
+  email_type: 'request_confirmation' | 'booking_confirmation';
+  subject: string;
+  body_text: string;
+  body_html: string;
+  status: 'sent' | 'pending' | 'invalid_email';
+  user_id?: string | null;
+  request_id?: string | null;
+  booking_id?: string | null;
+  created_at: string;
+}
+
+export interface BookingEmailDetails {
+  success: boolean;
+  request_id?: string;
+  booking_id?: string;
+  title: string;
+  category_name: string;
+  area_name: string;
+  address: string;
+  preferred_start: string;
+  scheduled_time: string;
+  price: number;
+  customer: {
+    id: string;
+    name: string;
+    email: string;
+    phone: string;
+  };
+  provider: {
+    id: string;
+    user_id: string;
+    name: string;
+    email: string;
+    phone: string;
+  };
 }

@@ -44,6 +44,7 @@ export async function fetchServiceRequests(filters?: {
   customerId?: string;
   providerProfileId?: string;
   status?: string;
+  statuses?: string[];
   type?: 'ordinary' | 'emergency';
 }): Promise<ServiceRequest[]> {
   let query = supabase
@@ -65,7 +66,9 @@ export async function fetchServiceRequests(filters?: {
   if (filters?.type) {
     query = query.eq('type', filters.type);
   }
-  if (filters?.status) {
+  if (filters?.statuses && filters.statuses.length > 0) {
+    query = query.in('status', filters.statuses);
+  } else if (filters?.status) {
     query = query.eq('status', filters.status);
   }
 
@@ -695,7 +698,7 @@ export async function uploadServiceImage(blob: Blob, filename?: string): Promise
   }
 }
 
-// 19. Fetch Provider Ordinary Job Feed (13km radius, preference match, 8h gap fit)
+// 19. Fetch Provider Ordinary Job Feed (13km radius, preference match, calender fit)
 export async function fetchProviderOrdinaryFeed(providerUserId: string): Promise<any[]> {
   const { data, error } = await supabase.rpc('get_provider_ordinary_feed', {
     p_provider_user_id: providerUserId
@@ -1408,16 +1411,81 @@ export async function adminUpdateCategory(params: {
   basePrice?: number;
   imageUrl?: string;
   active?: boolean;
-}): Promise<{ success: boolean }> {
+  description?: string;
+  nameTa?: string;
+}): Promise<{ success: boolean; message?: string }> {
   const { data, error } = await supabase.rpc('admin_update_category', {
-    p_category_id: params.categoryId,
-    p_name:        params.name        ?? null,
-    p_base_price:  params.basePrice   ?? null,
-    p_image_url:   params.imageUrl    ?? null,
-    p_active:      params.active      ?? null,
+    p_category_id:    params.categoryId,
+    p_name:           params.name        ?? null,
+    p_base_price:     params.basePrice   ?? null,
+    p_default_image:  params.imageUrl    ?? null,
+    p_active:         params.active      ?? null,
+    p_description:    params.description ?? null,
+    p_name_ta:        params.nameTa      ?? null,
   });
   if (error) throw new Error(error.message);
-  return data as { success: boolean };
+  return data as { success: boolean; message?: string };
+}
+
+// adminUpdateSetting
+export async function adminUpdateSetting(
+  key: string,
+  value: any
+): Promise<{ success: boolean; message?: string }> {
+  const { data, error } = await supabase.rpc('admin_update_setting', {
+    p_key: key,
+    p_value: value,
+  });
+  if (error) throw new Error(error.message);
+  return data as { success: boolean; message?: string };
+}
+
+// adminUpdateUser
+export async function adminUpdateUser(params: {
+  userId: string;
+  name?: string;
+  phone?: string;
+  role?: string;
+  status?: string;
+  rating?: number;
+  coins?: number;
+}): Promise<{ success: boolean; message?: string }> {
+  const { data, error } = await supabase.rpc('admin_update_user', {
+    p_user_id: params.userId,
+    p_name: params.name ?? null,
+    p_phone: params.phone ?? null,
+    p_role: params.role ?? null,
+    p_status: params.status ?? null,
+    p_rating: params.rating ?? null,
+    p_coins: params.coins ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return data as { success: boolean; message?: string };
+}
+
+// adminUpdateProvider
+export async function adminUpdateProvider(params: {
+  providerProfileId: string;
+  name?: string;
+  phone?: string;
+  providerType?: string;
+  experience?: number;
+  status?: string;
+  rating?: number;
+  coins?: number;
+}): Promise<{ success: boolean; message?: string }> {
+  const { data, error } = await supabase.rpc('admin_update_provider', {
+    p_provider_profile_id: params.providerProfileId,
+    p_name: params.name ?? null,
+    p_phone: params.phone ?? null,
+    p_provider_type: params.providerType ?? null,
+    p_experience: params.experience ?? null,
+    p_status: params.status ?? null,
+    p_rating: params.rating ?? null,
+    p_coins: params.coins ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return data as { success: boolean; message?: string };
 }
 
 // 54. fetchRevenue – from revenue_by_period view
@@ -1542,3 +1610,351 @@ export function subscribeToDisputeMessages(
   return () => { supabase.removeChannel(channel); };
 }
 
+// ============================================================================
+// DEMO MODE TOGGLE (62–63)
+// Admin-only. Persisted in settings table. OFF hides all is_demo=true records
+// via RLS; ON restores visibility. Real data is never affected.
+// ============================================================================
+
+
+export async function adminGetDemoMode(): Promise<{ enabled: boolean }> {
+  const { data, error } = await supabase.rpc('get_demo_data_enabled');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return {
+    enabled: Boolean((data as { enabled?: boolean } | null)?.enabled),
+  };
+}
+
+export async function adminSetDemoMode(
+  enabled: boolean
+): Promise<{ success: boolean; enabled: boolean }> {
+  const { data, error } = await supabase.rpc('set_demo_data_enabled', {
+    enabled,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as { success: boolean; enabled: boolean };
+}
+
+export async function deleteDemoData(): Promise<{ success: boolean }> {
+  const { data, error } = await supabase.rpc('delete_demo_data');
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data as { success: boolean };
+}
+
+// ============================================================================
+// EARLY FINISH TOGGLE (64–65)
+// Admin-only. When ON, both customer and provider see a Finish button
+// immediately after posting regardless of scheduled time.
+// ============================================================================
+
+export async function adminGetAllowEarlyFinish(): Promise<{ enabled: boolean }> {
+  const { data, error } = await supabase.rpc('admin_get_allow_early_finish');
+  if (error) throw new Error(error.message);
+  return { enabled: Boolean((data as any)?.enabled) };
+}
+
+export async function adminSetAllowEarlyFinish(enabled: boolean): Promise<{ success: boolean; enabled: boolean }> {
+  const { data, error } = await supabase.rpc('admin_set_allow_early_finish', { p_enabled: enabled });
+  if (error) throw new Error(error.message);
+  return data as { success: boolean; enabled: boolean };
+}
+
+// ============================================================================
+// IMMEDIATE AUCTION TOGGLE (66–67)
+// Admin-only. When ON, admin can force-finish an auction even if min
+// participants/time haven't been met. The highest bidder wins.
+// ============================================================================
+
+export async function adminGetImmediateAuction(): Promise<{ enabled: boolean }> {
+  const { data, error } = await supabase.rpc('admin_get_immediate_auction');
+  if (error) throw new Error(error.message);
+  return { enabled: Boolean((data as any)?.enabled) };
+}
+
+export async function adminSetImmediateAuction(enabled: boolean): Promise<{ success: boolean; enabled: boolean }> {
+  const { data, error } = await supabase.rpc('admin_set_immediate_auction', { p_enabled: enabled });
+  if (error) throw new Error(error.message);
+  return data as { success: boolean; enabled: boolean };
+}
+
+// 68. adminFinishAuctionNow
+// Force-close the bidding round and award to highest bidder immediately.
+export async function adminFinishAuctionNow(requestId: string): Promise<{
+  success: boolean;
+  awarded_to?: string;
+  winning_coins?: number;
+  message?: string;
+  error?: string;
+}> {
+  const { data, error } = await supabase.rpc('admin_finish_auction_now', { p_request_id: requestId });
+  if (error) throw new Error(error.message);
+  return data as any;
+}
+
+// ============================================================================
+// CANCEL WITH PENALTIES (69–70)
+// ============================================================================
+
+// 69. customerCancelRequest
+// Cancel a service request as a customer.
+// Penalty: if provider had already taken the job, deduct 0.1 rating.
+export async function customerCancelRequest(
+  requestId: string,
+  customerId: string
+): Promise<{
+  success: boolean;
+  penalty_applied?: boolean;
+  penalty_type?: string;
+  message?: string;
+  error?: string;
+}> {
+  const { data, error } = await supabase.rpc('customer_cancel_request', {
+    p_request_id: requestId,
+    p_customer_id: customerId,
+  });
+  if (error) throw new Error(error.message);
+  return data as any;
+}
+
+// 70. providerCancelBooking
+// Cancel a booking as a provider.
+// Penalty: deduct 3 coins + 0.1 rating from provider.
+export async function providerCancelBooking(
+  requestId: string,
+  providerProfileId: string
+): Promise<{
+  success: boolean;
+  coins_deducted?: number;
+  rating_deducted?: number;
+  message?: string;
+  error?: string;
+}> {
+  const { data, error } = await supabase.rpc('provider_cancel_booking', {
+    p_request_id: requestId,
+    p_provider_profile_id: providerProfileId,
+  });
+  if (error) throw new Error(error.message);
+  return data as any;
+}
+
+// ============================================================================
+// MARK JOB FINISHED BY ROLE (71)
+// Called by customer or provider to mark job as finished.
+// When both sides click Finish, job completes and feedback/review flow triggers.
+// ============================================================================
+
+export async function markJobFinishedByRole(
+  requestId: string,
+  userId: string,
+  role: 'customer' | 'provider'
+): Promise<{
+  success: boolean;
+  both_finished?: boolean;
+  message?: string;
+  error?: string;
+}> {
+  const { data, error } = await supabase.rpc('mark_job_finished_by_role', {
+    p_request_id: requestId,
+    p_user_id: userId,
+    p_role: role,
+  });
+  if (error) throw new Error(error.message);
+  return data as any;
+}
+
+// ============================================================================
+// EMAIL CONFIRMATIONS (72)
+// Request Confirmation & Booking Confirmation with strict validity verification.
+// ============================================================================
+
+export function isValidEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  if (!clean) return false;
+  // RFC-compliant validation: requires non-empty username, @, domain, dot, and >=2 char TLD
+  const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+  return emailRegex.test(clean);
+}
+
+export async function sendConfirmationEmail(params: {
+  userId?: string | null;
+  email: string;
+  recipientName?: string;
+  recipientRole: 'customer' | 'provider' | 'admin';
+  emailType: 'request_confirmation' | 'booking_confirmation';
+  subject: string;
+  bodyText: string;
+  bodyHtml: string;
+  requestId?: string;
+  bookingId?: string;
+}): Promise<{ success: boolean; email_id?: string; email?: string; message: string; error?: string }> {
+  const { data, error } = await supabase.rpc('validate_and_send_email', {
+    p_user_id: params.userId ?? null,
+    p_email: params.email,
+    p_recipient_name: params.recipientName ?? 'Valued User',
+    p_recipient_role: params.recipientRole,
+    p_email_type: params.emailType,
+    p_subject: params.subject,
+    p_body_text: params.bodyText,
+    p_body_html: params.bodyHtml,
+    p_request_id: params.requestId ?? null,
+    p_booking_id: params.bookingId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return data as any;
+}
+
+export async function getBookingEmailDetails(params: {
+  bookingId?: string;
+  requestId?: string;
+}): Promise<any> {
+  const { data, error } = await supabase.rpc('get_booking_email_details', {
+    p_booking_id: params.bookingId ?? null,
+    p_request_id: params.requestId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function fetchSentEmails(userId: string): Promise<any[]> {
+  const { data, error } = await supabase
+    .from('sent_emails')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+export function generateRequestConfirmationEmail(details: {
+  requestId: string;
+  customerName: string;
+  title: string;
+  categoryName: string;
+  scheduledTime: string;
+  address: string;
+  price: number;
+  isEmergency?: boolean;
+}) {
+  const subject = `[HomeCrew] Request Confirmation: ${details.title}`;
+  const bodyText = `Hello ${details.customerName},
+
+Thank you for choosing HomeCrew! Your service request has been successfully posted.
+
+--- Request Summary ---
+Request ID: ${details.requestId}
+Service: ${details.title}
+Category: ${details.categoryName}
+Type: ${details.isEmergency ? 'Emergency (45-Min Broadcast Arena)' : 'Standard Work Order'}
+Scheduled Time: ${new Date(details.scheduledTime).toLocaleString()}
+Service Address: ${details.address}
+Estimated/Offered Price: Rs ${details.price}
+
+Next Steps:
+We will notify you and send a Booking Confirmation email as soon as a qualified local provider accepts your work order.
+
+Need assistance? Reply directly to this email or reach our support team anytime.
+Warm regards,
+Team HomeCrew`;
+
+  const bodyHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+  <div style="border-bottom: 2px solid #0f766e; padding-bottom: 16px; margin-bottom: 20px;">
+    <h2 style="color: #0f766e; margin: 0; font-size: 1.4rem;">HomeCrew Service Request Confirmed</h2>
+    <p style="color: #64748b; margin: 4px 0 0; font-size: 0.9rem;">Thank you for your order, ${details.customerName}!</p>
+  </div>
+  <p style="font-size: 0.95rem; color: #334155; line-height: 1.5;">
+    Your service request is now active and published to our verified professional network.
+  </p>
+  <div style="background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 16px; margin: 20px 0;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Order Reference:</td><td style="padding: 6px 0; font-family: monospace; color: #0f766e; font-weight: bold;">${details.requestId.substring(0, 8)}...</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Service Title:</td><td style="padding: 6px 0; font-weight: bold; color: #1e293b;">${details.title}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Category:</td><td style="padding: 6px 0; color: #1e293b;">${details.categoryName}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Scheduled Arrival:</td><td style="padding: 6px 0; color: #1e293b;">${new Date(details.scheduledTime).toLocaleString()}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Address:</td><td style="padding: 6px 0; color: #1e293b;">${details.address}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Estimated Price:</td><td style="padding: 6px 0; font-size: 1.1rem; color: #0f766e; font-weight: 800;">₹${details.price}</td></tr>
+    </table>
+  </div>
+  <p style="font-size: 0.88rem; color: #64748b; line-height: 1.5;">
+    You will receive a follow-up <strong>Booking Confirmation Email</strong> with your assigned provider's credentials and direct contact details once accepted.
+  </p>
+  <div style="border-top: 1px solid #e2e8f0; margin-top: 24px; padding-top: 16px; font-size: 0.8rem; color: #94a3b8; text-align: center;">
+    HomeCrew Automated Notifications · All Rights Reserved
+  </div>
+</div>`;
+
+  return { subject, bodyText, bodyHtml };
+}
+
+export function generateBookingConfirmationEmail(details: {
+  bookingId: string;
+  requestId: string;
+  recipientRole: 'customer' | 'provider';
+  recipientName: string;
+  otherPartyName: string;
+  otherPartyPhone: string;
+  title: string;
+  categoryName: string;
+  scheduledTime: string;
+  address: string;
+  price: number;
+}) {
+  const isCustomer = details.recipientRole === 'customer';
+  const subject = `[HomeCrew] Booking Confirmed: ${details.title}`;
+  const bodyText = `Hello ${details.recipientName},
+
+Great news! The service booking for "${details.title}" is officially CONFIRMED!
+
+--- Booking Details ---
+Booking ID: ${details.bookingId}
+${isCustomer ? `Assigned Professional: ${details.otherPartyName} (${details.otherPartyPhone})` : `Customer: ${details.otherPartyName} (${details.otherPartyPhone})`}
+Service: ${details.title}
+Category: ${details.categoryName}
+Scheduled Arrival: ${new Date(details.scheduledTime).toLocaleString()}
+Location: ${details.address}
+Service Fee: Rs ${details.price}
+
+${isCustomer ? 'Your provider is preparing for the scheduled arrival. You can chat directly with your provider via the HomeCrew customer app.' : 'Please arrive promptly at the scheduled time. Open the in-app chat with the customer to coordinate arrival details.'}
+
+Warm regards,
+Team HomeCrew`;
+
+  const bodyHtml = `
+<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+  <div style="border-bottom: 2px solid #16a34a; padding-bottom: 16px; margin-bottom: 20px;">
+    <h2 style="color: #16a34a; margin: 0; font-size: 1.4rem;">Booking Confirmation</h2>
+    <p style="color: #64748b; margin: 4px 0 0; font-size: 0.9rem;">Hello ${details.recipientName}, your service booking is locked in!</p>
+  </div>
+  <div style="background-color: #f0fdf4; border: 1.5px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Booking ID:</td><td style="padding: 6px 0; font-family: monospace; color: #16a34a; font-weight: bold;">${details.bookingId.substring(0, 8)}...</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Service:</td><td style="padding: 6px 0; font-weight: bold; color: #1e293b;">${details.title}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">${isCustomer ? 'Provider' : 'Customer'}:</td><td style="padding: 6px 0; font-weight: bold; color: #1e293b;">${details.otherPartyName} · ${details.otherPartyPhone}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Scheduled Arrival:</td><td style="padding: 6px 0; color: #1e293b;">${new Date(details.scheduledTime).toLocaleString()}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Service Location:</td><td style="padding: 6px 0; color: #1e293b;">${details.address}</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b; font-weight: bold;">Total Amount:</td><td style="padding: 6px 0; font-size: 1.15rem; color: #16a34a; font-weight: 800;">₹${details.price}</td></tr>
+    </table>
+  </div>
+  <p style="font-size: 0.88rem; color: #475569; line-height: 1.5;">
+    ${isCustomer ? 'Need to share extra instructions or photos? Open the in-app chat with your provider anytime.' : 'Remember to inspect the site and mark the job finished in the HomeCrew provider portal once work is complete.'}
+  </p>
+  <div style="border-top: 1px solid #e2e8f0; margin-top: 24px; padding-top: 16px; font-size: 0.8rem; color: #94a3b8; text-align: center;">
+    HomeCrew Automated Notifications · All Rights Reserved
+  </div>
+</div>`;
+
+  return { subject, bodyText, bodyHtml };
+}

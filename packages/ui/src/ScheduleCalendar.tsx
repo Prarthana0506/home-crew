@@ -45,7 +45,7 @@ function parseRange(rangeStr: string): { start: Date; end: Date } {
 export const ScheduleCalendar: React.FC<ScheduleCalendarProps> = ({
   bookings,
   role = 'provider',
-  minGapHours = 8.0,
+  minGapHours = 4.0,
   onSelectBooking
 }) => {
   const [viewMode, setViewMode] = useState<'week' | 'day'>('week');

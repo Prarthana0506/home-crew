@@ -240,7 +240,7 @@ export const translations = {
     calendar_free: 'Available',
     calendar_job_start: 'Job Start',
     calendar_job_end: 'Job End',
-    calendar_gap_warning: 'Must have 8 hours gap between jobs.',
+    calendar_gap_warning: 'Repeat bookings by the same customer need a 4-hour gap.',
 
     // ── Provider: Earnings / Coins ─────────────────────────────────────────
     earnings_title: 'Earnings & Coins',

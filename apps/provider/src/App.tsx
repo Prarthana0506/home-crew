@@ -26,6 +26,13 @@ import {
   fetchInAppNotifications,
   subscribeToInAppNotifications,
   requestPushPermissionAndRegister,
+  adminGetAllowEarlyFinish,
+  markJobFinishedByRole,
+  providerCancelBooking,
+  isValidEmail,
+  sendConfirmationEmail,
+  getBookingEmailDetails,
+  generateBookingConfirmationEmail,
   supabase,
   type ServiceRequest,
   type CoinLedgerEntry,
@@ -53,6 +60,7 @@ import {
   PrivacyPolicyPage,
   TermsPage,
   AppFooter,
+  EmailValidationModal,
   type AddTechFormData
 } from '@urbanclap/ui';
 import {
@@ -68,7 +76,9 @@ import {
   Lock,
   Unlock,
   TrendingUp,
-  Clock
+  Clock,
+  XCircle,
+  AlertTriangle
 } from 'lucide-react';
 
 const ProviderAppContent: React.FC = () => {
@@ -82,13 +92,18 @@ const ProviderAppContent: React.FC = () => {
   const [technicians, setTechnicians] = useState<any[]>([]);
   const [orgRating, setOrgRating] = useState<any | null>(null);
   const [settings, setSettings] = useState<Record<string, any>>({
-    min_gap_hours: 8.0,
+    min_gap_hours: 4.0,
     bidding_min_coins: 35,
     bidding_min_reviews: 3,
     bidding_min_rating: 3.5
   });
 
   const [_loading, setLoading] = useState(false);
+
+  // Early finish & Cancel states
+  const [allowEarlyFinish, setAllowEarlyFinish] = useState<boolean>(false);
+  const [finishingJobId, setFinishingJobId] = useState<string | null>(null);
+  const [cancellingJobId, setCancellingJobId] = useState<string | null>(null);
 
   // Sub nav tab
   const [activeTab, setActiveTab] = useState<'bidding' | 'ordinary' | 'calendar' | 'coins' | 'technicians' | 'history'>('ordinary');
@@ -129,6 +144,58 @@ const ProviderAppContent: React.FC = () => {
   // Notification Inbox & Push State
   const [inboxOpen, setInboxOpen] = useState(false);
   const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
+
+  // Email Validation Modal State
+  const [emailModalState, setEmailModalState] = useState<{
+    isOpen: boolean;
+    reason: 'request_confirmation' | 'booking_confirmation';
+    jobTitle?: string;
+    requestId?: string;
+    bookingId?: string;
+    providerName?: string;
+    customerName?: string;
+    otherPartyPhone?: string;
+    categoryName?: string;
+    scheduledTime?: string;
+    address?: string;
+    price?: number;
+  } | null>(null);
+
+  const handleSendEmailFromModal = async (givenEmail: string): Promise<{ success: boolean; message?: string }> => {
+    if (!emailModalState) return { success: false, message: 'No email session active.' };
+
+    try {
+      const emailData = generateBookingConfirmationEmail({
+        bookingId: emailModalState.bookingId || '',
+        requestId: emailModalState.requestId || '',
+        recipientRole: 'provider',
+        recipientName: emailModalState.providerName || profile?.name || 'Technician',
+        otherPartyName: emailModalState.customerName || 'Customer',
+        otherPartyPhone: emailModalState.otherPartyPhone || '--',
+        title: emailModalState.jobTitle || 'Service Booking',
+        categoryName: emailModalState.categoryName || 'Home Service',
+        scheduledTime: emailModalState.scheduledTime || new Date().toISOString(),
+        address: emailModalState.address || 'On file',
+        price: emailModalState.price || 0,
+      });
+
+      const res = await sendConfirmationEmail({
+        userId: authUser?.id,
+        email: givenEmail,
+        recipientName: profile?.name,
+        recipientRole: 'provider',
+        emailType: 'booking_confirmation',
+        subject: emailData.subject,
+        bodyText: emailData.bodyText,
+        bodyHtml: emailData.bodyHtml,
+        requestId: emailModalState.requestId,
+        bookingId: emailModalState.bookingId,
+      });
+      return res;
+    } catch (err: any) {
+      return { success: false, message: err.message };
+    }
+  };
 
   const loadUnreadNotifs = useCallback(async () => {
     if (!authUser?.id) return;
@@ -206,15 +273,17 @@ const ProviderAppContent: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [emerg, stt] = await Promise.all([
-        fetchServiceRequests({ type: 'emergency', status: 'bidding_active' }),
-        fetchSettings()
+      const [emerg, stt, earlyFinishRes] = await Promise.all([
+        fetchServiceRequests({ type: 'emergency', statuses: ['bidding_active', 'bidding_open', 'interest_window'] }),
+        fetchSettings(),
+        adminGetAllowEarlyFinish().catch(() => ({ enabled: false }))
       ]);
       setEmergencyRequests(emerg);
       setSettings(stt);
+      setAllowEarlyFinish(Boolean(earlyFinishRes?.enabled));
 
       if (authUser?.id) {
-        // Fetch provider feed (within 13km, preference match, 8h gap fit)
+        // Fetch provider feed (within 13km, preference match, calender fit)
         const feed = await fetchProviderOrdinaryFeed(authUser.id);
         setOrdinaryFeed(feed);
       }
@@ -236,7 +305,7 @@ const ProviderAppContent: React.FC = () => {
         ]);
 
         setCoinLedger(ledgerData);
-        setAssignedBookings(myBookings.data || []);
+        setAssignedBookings((myBookings.data || []).filter((r: any) => r.status !== 'cancelled'));
         setCalendarBookings(providerCalBookings);
 
         if (providerProfile.organization_id) {
@@ -256,6 +325,20 @@ const ProviderAppContent: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [authUser?.id, providerProfile?.id]);
+
+  // Realtime settings sync (early finish toggle, etc.)
+  useEffect(() => {
+    if (!authUser?.id) return;
+    const channel = supabase
+      .channel('provider-settings-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'settings' },
+        () => { loadData(); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [authUser?.id]);
 
   // ------------------------------------------------------------------
   // Realtime subscriptions for each live emergency request
@@ -452,10 +535,101 @@ const ProviderAppContent: React.FC = () => {
         return;
       }
 
-      setActionMsg({
-        type: 'success',
-        text: `Work order accepted! A ${res.hold_hours || 2}-hour pending hold is placed on your calendar. Open chat with customer to confirm arrival time.`
-      });
+      // Booking confirmed! Check validity and send booking confirmation emails to both customer & provider
+      try {
+        const details = await getBookingEmailDetails({ requestId: req.id });
+        const customerEmail = details?.customer?.email || '';
+        const providerEmail = authUser?.email || profile?.email || details?.provider?.email || '';
+
+        // 1. Customer booking confirmation email
+        if (isValidEmail(customerEmail)) {
+          const custEmail = generateBookingConfirmationEmail({
+            bookingId: details.booking_id || req.id,
+            requestId: req.id,
+            recipientRole: 'customer',
+            recipientName: details.customer?.name || 'Customer',
+            otherPartyName: profile?.name || details.provider?.name || 'Technician',
+            otherPartyPhone: profile?.phone || details.provider?.phone || '--',
+            title: req.title,
+            categoryName: details.category_name,
+            scheduledTime: req.preferred_start,
+            address: req.address_confidential || details.address || 'On file',
+            price: details.price || req.offered_price,
+          });
+          sendConfirmationEmail({
+            userId: details.customer?.id,
+            email: customerEmail,
+            recipientName: details.customer?.name,
+            recipientRole: 'customer',
+            emailType: 'booking_confirmation',
+            subject: custEmail.subject,
+            bodyText: custEmail.bodyText,
+            bodyHtml: custEmail.bodyHtml,
+            requestId: req.id,
+            bookingId: details.booking_id,
+          }).catch(console.warn);
+        }
+
+        // 2. Provider booking confirmation email
+        if (isValidEmail(providerEmail)) {
+          const provEmail = generateBookingConfirmationEmail({
+            bookingId: details.booking_id || req.id,
+            requestId: req.id,
+            recipientRole: 'provider',
+            recipientName: profile?.name || 'Technician',
+            otherPartyName: details.customer?.name || 'Customer',
+            otherPartyPhone: details.customer?.phone || '--',
+            title: req.title,
+            categoryName: details.category_name,
+            scheduledTime: req.preferred_start,
+            address: req.address_confidential || details.address || 'On file',
+            price: details.price || req.offered_price,
+          });
+          sendConfirmationEmail({
+            userId: authUser?.id,
+            email: providerEmail,
+            recipientName: profile?.name,
+            recipientRole: 'provider',
+            emailType: 'booking_confirmation',
+            subject: provEmail.subject,
+            bodyText: provEmail.bodyText,
+            bodyHtml: provEmail.bodyHtml,
+            requestId: req.id,
+            bookingId: details.booking_id,
+          }).catch(console.warn);
+
+          setActionMsg({
+            type: 'success',
+            text: `Work order accepted! Booking confirmation mail sent to ${providerEmail}. A ${res.hold_hours || 2}-hour hold is placed on your calendar.`
+          });
+        } else {
+          // Provider email is not valid! Pop up modal: "Not valid mail. Provide a valid mail and send the mail to the given mail."
+          setActionMsg({
+            type: 'success',
+            text: `Work order accepted! Note: Registered email is not valid. Please provide a valid mail for confirmation.`
+          });
+          setEmailModalState({
+            isOpen: true,
+            reason: 'booking_confirmation',
+            jobTitle: req.title,
+            requestId: req.id,
+            bookingId: details.booking_id,
+            providerName: profile?.name,
+            customerName: details.customer?.name,
+            otherPartyPhone: details.customer?.phone,
+            categoryName: details.category_name,
+            scheduledTime: req.preferred_start,
+            address: req.address_confidential || details.address || 'On file',
+            price: details.price || req.offered_price,
+          });
+        }
+      } catch (emailErr) {
+        console.warn('Booking confirmation email error:', emailErr);
+        setActionMsg({
+          type: 'success',
+          text: `Work order accepted! A ${res.hold_hours || 2}-hour pending hold is placed on your calendar. Open chat with customer to confirm arrival time.`
+        });
+      }
 
       await loadData();
       setActiveTab('calendar');
@@ -475,14 +649,53 @@ const ProviderAppContent: React.FC = () => {
     }
   };
 
-  const _handleCompleteJob = async (req: ServiceRequest) => {
-    if (!providerProfile?.id) return;
+  const handleProviderFinishJob = async (req: ServiceRequest) => {
+    if (!authUser?.id) return;
+    if (!confirm(`Mark "${req.title}" as finished? When both you and the customer confirm, the job completes immediately and completion reward is added.`)) return;
+    setFinishingJobId(req.id);
     try {
-      await completeWorkOrder(req.id, providerProfile.id);
-      alert('Work order marked as completed! Completion reward of 20 coins added to your ledger balance.');
-      await loadData();
+      const res = await markJobFinishedByRole(req.id, authUser.id, 'provider');
+      if (res.success) {
+        if (res.both_finished) {
+          alert(res.message || 'Both parties marked the job finished! 20 coins reward added. Please submit your review.');
+          const booking = (req.bookings && req.bookings.length > 0) ? req.bookings[0] : null;
+          const bId = booking?.id || (res as any).booking_id;
+          if (bId) {
+            setReviewBookingId(bId);
+          } else {
+            setReviewRequest(req);
+          }
+        } else {
+          alert(res.message || 'Finish confirmation recorded. Waiting for customer confirmation.');
+        }
+        await loadData();
+      } else {
+        alert(res.error || 'Failed to mark job finished');
+      }
     } catch (err: any) {
-      alert(err.message || 'Failed to mark job as complete');
+      alert(err.message || 'Failed to mark job finished');
+    } finally {
+      setFinishingJobId(null);
+    }
+  };
+
+  const handleProviderCancelBooking = async (req: ServiceRequest) => {
+    if (!providerProfile?.id) return;
+    if (!confirm(`Warning: Cancelling an accepted job will deduct 3 coins from your balance and 0.1 from your rating.\n\nAre you sure you want to cancel "${req.title}"?`)) return;
+
+    setCancellingJobId(req.id);
+    try {
+      const res = await providerCancelBooking(req.id, providerProfile.id);
+      if (res.success) {
+        alert(res.message || 'Booking cancelled. 3 coins and 0.1 rating deducted from your account.');
+        await loadData();
+      } else {
+        alert(res.error || 'Failed to cancel booking');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to cancel booking');
+    } finally {
+      setCancellingJobId(null);
     }
   };
 
@@ -818,7 +1031,7 @@ const ProviderAppContent: React.FC = () => {
               ))}
             </div>
 
-            {/* Tab 1: Open Ordinary Job Feed (13km radius, preference match, 8h gap fit) */}
+            {/* Tab 1: Open Ordinary Job Feed (13km radius, preference match,calender fit) */}
             {activeTab === 'ordinary' && (
               <Card>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
@@ -827,7 +1040,7 @@ const ProviderAppContent: React.FC = () => {
                       Open Standard Home Services (Within 13 km)
                     </h2>
                     <p style={{ fontSize: '0.8rem', color: 'var(--color-muted)', marginTop: '2px' }}>
-                      Filtered for your locality ({profile?.area?.name || 'Coimbatore'}), provider preference, and 8-hour gap schedule availability.
+                      Filtered for your locality ({profile?.area?.name || 'Coimbatore'}), provider preference, and calendar availability.
                     </p>
                   </div>
 
@@ -854,7 +1067,7 @@ const ProviderAppContent: React.FC = () => {
                           alignItems: 'center',
                           flexWrap: 'wrap',
                           gap: '14px',
-                          backgroundColor: '#ffffff',
+                          backgroundColor: '#a2dbf5ff',
                           boxShadow: 'var(--shadow-flat)'
                         }}
                       >
@@ -933,7 +1146,7 @@ const ProviderAppContent: React.FC = () => {
                       Provider Calendar & Schedule
                     </h2>
                     <p style={{ fontSize: '0.8rem', color: 'var(--color-muted)', marginTop: '2px' }}>
-                      Enforcing 8-hour mandatory gaps between consecutive assignments and 8 AM to 7 PM operating hours.
+                      Enforcing a 4-hour gap between repeat bookings by the same customer and 8 AM to 7 PM operating hours
                     </p>
                   </div>
                 </div>
@@ -941,7 +1154,7 @@ const ProviderAppContent: React.FC = () => {
                 <ScheduleCalendar
                   bookings={calendarBookings}
                   role="provider"
-                  minGapHours={Number(settings.min_gap_hours) || 8.0}
+                  minGapHours={Number(settings.min_gap_hours) || 4.0}
                   onSelectBooking={b => {
                     if (b.request) {
                       setChatRequest(b.request as any);
@@ -972,7 +1185,7 @@ const ProviderAppContent: React.FC = () => {
                           <div
                             key={req.id}
                             style={{
-                              backgroundColor: '#ffffff',
+                              backgroundColor: '#8eded5ff',
                               border: '2px solid var(--color-border)',
                               borderRadius: 'var(--radius-sm)',
                               padding: '16px',
@@ -991,9 +1204,41 @@ const ProviderAppContent: React.FC = () => {
                                   Customer: {req.customer?.name || 'Customer'} | Locality: {req.area?.name || 'Area'}
                                 </p>
                               </div>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                              {allowEarlyFinish && !['completed', 'cancelled'].includes(req.status) && (
+                                req.provider_marked_finished ? (
+                                  <span style={{ fontSize: '0.8rem', fontWeight: 800, color: '#059669', background: '#ecfdf5', border: '1.5px solid #059669', borderRadius: '6px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                    <CheckCircle size={14} /> You marked finished
+                                  </span>
+                                ) : (
+                                  <Button
+                                    id={`provider-early-finish-${req.id}`}
+                                    size="sm"
+                                    variant="primary"
+                                    onClick={() => handleProviderFinishJob(req)}
+                                    disabled={finishingJobId === req.id}
+                                    style={{ backgroundColor: '#059669', borderColor: '#047857' }}
+                                  >
+                                    <CheckCircle size={14} /> {finishingJobId === req.id ? 'Finishing…' : 'Finish Job'}
+                                  </Button>
+                                )
+                              )}
+                              {!['completed', 'cancelled'].includes(req.status) && (
+                                <Button
+                                  id={`provider-cancel-booking-${req.id}`}
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => handleProviderCancelBooking(req)}
+                                  disabled={cancellingJobId === req.id}
+                                  style={{ borderColor: 'var(--color-crimson)', color: '#dc2626' }}
+                                >
+                                  <XCircle size={14} /> Cancel Booking
+                                </Button>
+                              )}
                               <Button size="sm" variant="secondary" onClick={() => setChatRequest(req)}>
                                 <MessageSquare size={14} /> Open Chat
                               </Button>
+                            </div>
                             </div>
 
                             {/* Job Status Stepper */}
@@ -1061,9 +1306,8 @@ const ProviderAppContent: React.FC = () => {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     {emergencyRequests.map(req => {
-                      const arena = liveArena[req.id];
-                      const biddingIsOpen = arena?.status === 'bidding_open';
-                      const biddingIsClosed = arena?.status === 'closed' || arena?.status === 'awarded';
+                      const biddingIsOpen = arena?.status ? arena.status === 'bidding_open' : (req.status === 'bidding_open' || req.status === 'bidding_active');
+                      const biddingIsClosed = arena?.status ? (arena.status === 'closed' || arena.status === 'awarded') : (req.status === 'closed' || req.status === 'awarded' || req.status === 'assigned');
                       const topBid = arena?.topBid ?? req.top_bid_coins ?? 0;
                       const secs = arena?.secsRemaining ?? null;
                       const recentBids = liveBids[req.id] ?? [];
@@ -1417,6 +1661,20 @@ const ProviderAppContent: React.FC = () => {
           onNavigate={handleNotificationNavigate}
         />
       )}
+
+      {/* Email Validation Modal */}
+      {emailModalState && (
+        <EmailValidationModal
+          isOpen={emailModalState.isOpen}
+          onClose={() => setEmailModalState(null)}
+          reason={emailModalState.reason}
+          recipientRole="provider"
+          initialEmail={authUser?.email || profile?.email || ''}
+          jobTitle={emailModalState.jobTitle}
+          onSend={handleSendEmailFromModal}
+        />
+      )}
+
       <AppFooter onPrivacy={() => setLegalPage('privacy')} onTerms={() => setLegalPage('terms')} />
     </div>
   );

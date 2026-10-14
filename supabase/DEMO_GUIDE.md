@@ -64,7 +64,7 @@ After running the seed, create the following auth users in **Supabase Dashboard 
 | Provider | mani@demo.homecrew   | Demo@1234 | `dd000000-…-0013` |
 | Provider | senthil@demo.homecrew| Demo@1234 | `dd000000-…-0014` |
 | Provider | vinoth@demo.homecrew | Demo@1234 | `dd000000-…-0015` |
-| Admin    | admin@demo.homecrew  | Demo@1234 | *(any)* |
+| Admin    | prarthanasampathkumar@gmail.com | 123456 | *(any)* |
 
 > Set the admin user's `role = 'admin'` in `public.profiles` after creation.
 

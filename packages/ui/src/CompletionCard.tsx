@@ -125,6 +125,8 @@ export const CompletionCard: React.FC<CompletionCardProps> = ({
   const jobStartDate = new Date(jobStart);
   const minsAfterStart = Math.floor((Date.now() - jobStartDate.getTime()) / 60000);
 
+  const canQuickMark = !isComplete && !isDisputed && !myMark;
+
   return (
     <div
       style={{
@@ -136,33 +138,49 @@ export const CompletionCard: React.FC<CompletionCardProps> = ({
       }}
     >
       {/* Header */}
-      <button
-        id={`completion-toggle-${bookingId}`}
-        onClick={() => setExpanded(e => !e)}
-        style={{
-          width: '100%', padding: '12px 16px', display: 'flex',
-          alignItems: 'center', justifyContent: 'space-between',
-          background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {isComplete
-            ? <CheckCircle size={17} color="var(--color-emerald)" />
-            : isDisputed
-            ? <ShieldAlert size={17} color="var(--color-crimson)" />
-            : <Clock size={17} color="var(--color-indigo)" />
-          }
-          <span style={{ fontWeight: 800, fontSize: 'var(--text-sm)' }}>
-            {isComplete ? 'Completed' : isDisputed ? 'Disputed' : 'In Progress'}
-          </span>
-          {!isComplete && !isDisputed && (
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted)', fontWeight: 600 }}>
-              ({myMark ? 'You marked done' : 'Mark when done'}{otherMark ? ', other party done' : ''})
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', padding: '12px 16px' }}>
+        <button
+          id={`completion-toggle-${bookingId}`}
+          onClick={() => setExpanded(e => !e)}
+          style={{
+            flex: 1, display: 'flex',
+            alignItems: 'center', justifyContent: 'space-between',
+            background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isComplete
+              ? <CheckCircle size={17} color="var(--color-emerald)" />
+              : isDisputed
+              ? <ShieldAlert size={17} color="var(--color-crimson)" />
+              : <Clock size={17} color="var(--color-indigo)" />
+            }
+            <span style={{ fontWeight: 800, fontSize: 'var(--text-sm)' }}>
+              {isComplete ? 'Completed' : isDisputed ? 'Disputed' : 'In Progress'}
             </span>
-          )}
-        </div>
-        {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-      </button>
+            {!isComplete && !isDisputed && (
+              <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-muted)', fontWeight: 600 }}>
+                ({myMark ? 'You marked done' : 'Mark when done'}{otherMark ? ', other party done' : ''})
+              </span>
+            )}
+          </div>
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+
+        {canQuickMark && (
+          <Button
+            id={`quick-mark-complete-btn-${bookingId}`}
+            variant="primary"
+            size="sm"
+            onClick={handleMarkComplete}
+            disabled={loading}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            <CheckCircle size={14} />
+            {loading ? 'Finishing...' : 'Finish Job'}
+          </Button>
+        )}
+      </div>
 
       {/* Body */}
       {expanded && (

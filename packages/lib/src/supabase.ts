@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
 const env = (typeof import.meta !== 'undefined' ? (import.meta as any).env : {}) || {};
-const supabaseUrl = env.VITE_SUPABASE_URL || 'https://demo-project.supabase.co';
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || 'demo-anon-key-placeholder';
+const procEnv = (typeof process !== 'undefined' && process.env) ? process.env : {};
+const supabaseUrl = env.VITE_SUPABASE_URL || procEnv.VITE_SUPABASE_URL || procEnv.SUPABASE_URL || 'https://demo-project.supabase.co';
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || procEnv.VITE_SUPABASE_ANON_KEY || procEnv.SUPABASE_ANON_KEY || 'demo-anon-key-placeholder';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

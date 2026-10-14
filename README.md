@@ -65,6 +65,41 @@ npm run dev:admin      # → http://localhost:5175
 
 ---
 
+## Admin Demo Mode
+
+The admin app (`apps/admin`) supports a **demo mode** that silently signs in as a seeded super-admin without showing a login page or a logout button.
+
+### Environment variables (`apps/admin/.env`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_DEMO_MODE` | yes | Set to `'true'` to enable demo mode. Any other value (or absent) uses the normal login screen. |
+| `VITE_DEMO_ADMIN_EMAIL` | when demo mode is `true` | Email of the seeded demo super-admin in the Supabase `auth.users` table. |
+| `VITE_DEMO_ADMIN_PASSWORD` | when demo mode is `true` | Password for the demo super-admin account. |
+
+### How demo mode works
+
+1. On mount, the app calls `supabase.auth.signInWithPassword` with the credentials above.
+2. The demo admin is a **real Supabase auth user** seeded by `supabase/demo_seed.sql` with `role = 'admin'` in `profiles`.
+3. All database security stays intact: RLS policies, role checks inside Postgres functions, and `audit_log` rows all fire normally — the demo user is just a regular admin.
+4. No `service_role` key is used in any browser code.
+5. The login page is skipped; no logout button is shown while demo mode is active.
+
+> [!CAUTION]
+> **The credentials in `VITE_DEMO_ADMIN_EMAIL` and `VITE_DEMO_ADMIN_PASSWORD` are embedded verbatim in the compiled browser JavaScript bundle** (Vite bakes all `import.meta.env.VITE_*` variables at build time). Anyone who downloads the JS bundle can read them. Never put real admin credentials here. Use only throwaway demo credentials whose only privilege is over seeded demo data.
+
+### Switching demo mode off
+
+Edit `apps/admin/.env` and change (or remove) the line:
+
+```env
+VITE_DEMO_MODE=false   # or remove the line entirely
+```
+
+Then restart the dev server (`npm run dev:admin`) or rebuild. The normal login screen will appear, and the Refresh button will be accompanied by a Sign Out button in the dashboard header.
+
+---
+
 ## Demo Guide
 
 See [`supabase/DEMO_GUIDE.md`](supabase/DEMO_GUIDE.md) for:

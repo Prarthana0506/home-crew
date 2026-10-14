@@ -1,406 +1,452 @@
--- ============================================================================
--- Migration 9 (Admin Additions):
---   1. Admin sub-roles (super / support / finance) stored in profiles.admin_role
---   2. Verification queue for providers & technicians
---   3. Revenue view from emergency_fee_payments (day / week / month)
---   4. RPC: set_emergency_fee (affects only future posts)
---   5. RPC: admin_update_category (edit name, base_price, image_url, active)
---   6. RPC: admin_fetch_users (full user list with coins & ban info)
---   7. RPC: admin_fetch_coin_ledger (per-provider coin ledger for admin)
---   8. Dispute chat table (admin can post messages with images)
---   9. RLS for every new table / function
--- ============================================================================
+-- supabase/migrations/20261014000001_admin_additions.sql
+-- HomeCrew / UrbanClap: Admin dashboard additions
+-- Safe to re-run where practical. Does not delete existing user data.
 
--- -----------------------------------------------------------------------
--- 1.  Admin sub-role column on profiles
--- -----------------------------------------------------------------------
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = 'admin_role'
-    ) THEN
-        ALTER TABLE public.profiles ADD COLUMN admin_role TEXT
-            CHECK (admin_role IN ('super', 'support', 'finance'));
-    END IF;
-END;
-$$;
+BEGIN;
 
--- -----------------------------------------------------------------------
--- 2.  Verification queue
--- -----------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.verification_requests (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider_profile_id UUID NOT NULL REFERENCES public.provider_profiles(id) ON DELETE CASCADE,
-    doc_type            TEXT NOT NULL CHECK (doc_type IN ('id_proof', 'selfie')),
-    document_url        TEXT NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'pending'
-                            CHECK (status IN ('pending', 'approved', 'rejected')),
-    reviewer_id         UUID REFERENCES public.profiles(id),
-    reviewer_note       TEXT,
-    submitted_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    reviewed_at         TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+-- =========================================================
+-- 1. ADMIN SETTINGS
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS public.settings (
+    key         text PRIMARY KEY,
+    value       jsonb NOT NULL DEFAULT '{}'::jsonb,
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    updated_by  uuid REFERENCES auth.users(id) ON DELETE SET NULL
 );
+
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+
+INSERT INTO public.settings (key, value)
+VALUES ('demo_data_enabled', '{"enabled": true}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
+-- =========================================================
+-- 2. ADMIN AUDIT LOG
+-- Compatible with the existing legacy and current audit columns.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS public.audit_log (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    table_name    text,
+    record_id     text,
+    action        text NOT NULL,
+    performed_by  uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+    old_data      jsonb,
+    new_data      jsonb,
+    created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
+
+-- =========================================================
+-- 3. DEMO SUPER-ADMIN ALLOWLIST
+-- Only explicitly allowlisted accounts can control demo mode.
+-- Add the intended super-admin by its verified Auth user ID/email.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS public.demo_super_admins (
+    user_id     uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.demo_super_admins ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.demo_super_admins FROM PUBLIC, anon, authenticated;
+
+-- Bootstrap the existing designated admin account if it exists.
+INSERT INTO public.demo_super_admins (user_id)
+SELECT u.id
+FROM auth.users AS u
+JOIN public.profiles AS p ON p.id = u.id
+WHERE lower(u.email) = lower('prarthanas0506@gmail.com')
+  AND p.role = 'admin'
+ON CONFLICT (user_id) DO NOTHING;
+
+-- =========================================================
+-- 4. DEMO VISIBILITY HELPER
+-- Non-demo rows remain visible. Demo rows follow the setting.
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION public.get_demo_data_enabled()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+    SELECT jsonb_build_object(
+        'enabled',
+        COALESCE(
+            (
+                SELECT (s.value ->> 'enabled')::boolean
+                FROM public.settings AS s
+                WHERE s.key = 'demo_data_enabled'
+            ),
+            true
+        )
+    );
+$function$;
+
+CREATE OR REPLACE FUNCTION public.demo_visible(p_is_demo boolean)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+    SELECT
+        NOT COALESCE(p_is_demo, false)
+        OR COALESCE(
+            (
+                SELECT (s.value ->> 'enabled')::boolean
+                FROM public.settings AS s
+                WHERE s.key = 'demo_data_enabled'
+            ),
+            true
+        );
+$function$;
+
+REVOKE ALL ON FUNCTION public.demo_visible(boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.demo_visible(boolean)
+TO authenticated, anon;
+
+REVOKE ALL ON FUNCTION public.get_demo_data_enabled() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_demo_data_enabled()
+TO authenticated;
+
+-- =========================================================
+-- 5. SET DEMO VISIBILITY
+-- Server-side super-admin authorization and audit logging.
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION public.set_demo_data_enabled(enabled boolean)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+    v_actor uuid;
+    v_old   jsonb;
+    v_new   jsonb;
+BEGIN
+    v_actor := auth.uid();
+
+    IF v_actor IS NULL THEN
+        RAISE EXCEPTION 'Authentication required';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM public.demo_super_admins AS sa
+        WHERE sa.user_id = v_actor
+    ) THEN
+        RAISE EXCEPTION 'Only an allowlisted super-admin can change demo visibility'
+            USING ERRCODE = '42501';
+    END IF;
+
+    SELECT s.value
+    INTO v_old
+    FROM public.settings AS s
+    WHERE s.key = 'demo_data_enabled'
+    FOR UPDATE;
+
+    v_old := COALESCE(v_old, '{"enabled": true}'::jsonb);
+    v_new := jsonb_build_object('enabled', enabled);
+
+    INSERT INTO public.settings (key, value, updated_at, updated_by)
+    VALUES ('demo_data_enabled', v_new, now(), v_actor)
+    ON CONFLICT (key)
+    DO UPDATE SET
+        value = EXCLUDED.value,
+        updated_at = now(),
+        updated_by = v_actor;
+
+    INSERT INTO public.audit_log (
+        table_name,
+        record_id,
+        action,
+        performed_by,
+        old_data,
+        new_data
+    )
+    VALUES (
+        'settings',
+        'demo_data_enabled',
+        'DEMO_VISIBILITY_CHANGED',
+        v_actor,
+        v_old,
+        v_new
+    );
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'enabled', enabled
+    );
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.set_demo_data_enabled(boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.set_demo_data_enabled(boolean)
+TO authenticated;
+
+-- =========================================================
+-- 6. VERIFICATION REQUESTS
+-- Create the table only if the application does not already
+-- have one. Existing objects are preserved.
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS public.verification_requests (
+    id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider_profile_id uuid NOT NULL
+        REFERENCES public.provider_profiles(id) ON DELETE CASCADE,
+    status              text NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected', 'under_review')),
+    document_url        text,
+    notes               text,
+    reviewed_by         uuid REFERENCES auth.users(id) ON DELETE SET NULL,
+    reviewed_at         timestamptz,
+    is_demo             boolean NOT NULL DEFAULT false,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_requests_status
+    ON public.verification_requests (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_verification_requests_provider
+    ON public.verification_requests (provider_profile_id);
 
 ALTER TABLE public.verification_requests ENABLE ROW LEVEL SECURITY;
 
--- Admin sees all; provider sees their own requests
-CREATE POLICY verif_admin ON public.verification_requests
-    FOR ALL TO authenticated
-    USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
+-- Existing rows are not automatically converted to demo rows.
+-- Demo visibility is enforced by the helper on reads.
+DROP POLICY IF EXISTS verification_requests_demo_visibility
+    ON public.verification_requests;
 
-CREATE POLICY verif_own ON public.verification_requests
-    FOR SELECT TO authenticated
-    USING (
-        provider_profile_id IN (
-            SELECT id FROM public.provider_profiles WHERE user_id = auth.uid()
-        )
-    );
+CREATE POLICY verification_requests_demo_visibility
+ON public.verification_requests
+AS RESTRICTIVE
+FOR SELECT
+TO authenticated
+USING (public.demo_visible(is_demo));
 
-CREATE POLICY verif_insert ON public.verification_requests
-    FOR INSERT TO authenticated
-    WITH CHECK (
-        provider_profile_id IN (
-            SELECT id FROM public.provider_profiles WHERE user_id = auth.uid()
-        )
-    );
+DROP POLICY IF EXISTS verification_requests_demo_visibility_anon
+    ON public.verification_requests;
 
--- -----------------------------------------------------------------------
--- 3.  Revenue view from emergency_fee_payments
--- -----------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.revenue_by_period AS
-SELECT
-    'day'                                        AS period,
-    date_trunc('day', created_at AT TIME ZONE 'Asia/Kolkata') AS period_start,
-    date_trunc('day', created_at AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 day' AS period_end,
-    COUNT(*)::INT                                 AS job_count,
-    COALESCE(SUM(amount), 0)                      AS total_fee
-FROM public.emergency_fee_payments
-WHERE status = 'paid'
-GROUP BY date_trunc('day', created_at AT TIME ZONE 'Asia/Kolkata')
+CREATE POLICY verification_requests_demo_visibility_anon
+ON public.verification_requests
+AS RESTRICTIVE
+FOR SELECT
+TO anon
+USING (NOT COALESCE(is_demo, false));
 
-UNION ALL
+-- Admin access for dashboard reads. Sensitive writes should use
+-- server-side authorization or dedicated RPCs.
+DROP POLICY IF EXISTS verification_requests_admin_read
+    ON public.verification_requests;
 
-SELECT
-    'week',
-    date_trunc('week', created_at AT TIME ZONE 'Asia/Kolkata'),
-    date_trunc('week', created_at AT TIME ZONE 'Asia/Kolkata') + INTERVAL '7 days',
-    COUNT(*)::INT,
-    COALESCE(SUM(amount), 0)
-FROM public.emergency_fee_payments
-WHERE status = 'paid'
-GROUP BY date_trunc('week', created_at AT TIME ZONE 'Asia/Kolkata')
-
-UNION ALL
-
-SELECT
-    'month',
-    date_trunc('month', created_at AT TIME ZONE 'Asia/Kolkata'),
-    date_trunc('month', created_at AT TIME ZONE 'Asia/Kolkata') + INTERVAL '1 month',
-    COUNT(*)::INT,
-    COALESCE(SUM(amount), 0)
-FROM public.emergency_fee_payments
-WHERE status = 'paid'
-GROUP BY date_trunc('month', created_at AT TIME ZONE 'Asia/Kolkata');
-
--- Admin-only access on the view
-CREATE POLICY rev_admin ON public.emergency_fee_payments
-    FOR SELECT TO authenticated
-    USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
-
--- -----------------------------------------------------------------------
--- 4.  RPC: set_emergency_fee
---     Inserts a new settings row with effective_from = now().
---     Old emergency posts keep the fee baked into their emergency_fee_payments rows.
--- -----------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.set_emergency_fee(p_fee NUMERIC)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_old_value JSONB;
-BEGIN
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'admin' THEN
-        RAISE EXCEPTION 'set_emergency_fee: permission denied (admin only)';
-    END IF;
-
-    IF p_fee <= 0 THEN
-        RAISE EXCEPTION 'Emergency fee must be positive, got %', p_fee;
-    END IF;
-
-    SELECT value INTO v_old_value FROM public.settings WHERE key = 'emergency_fee';
-
-    -- Insert a new versioned row
-    INSERT INTO public.settings (key, value, updated_by, updated_at)
-    VALUES ('emergency_fee', jsonb_build_object('value', p_fee), auth.uid(), now())
-    ON CONFLICT (key) DO UPDATE
-        SET value      = EXCLUDED.value,
-            updated_by = EXCLUDED.updated_by,
-            updated_at = EXCLUDED.updated_at;
-
-    -- Audit
-    INSERT INTO public.audit_log (table_name, record_id, operation, actor_id, changes)
-    VALUES ('settings', gen_random_uuid(), 'set_emergency_fee', auth.uid(),
-        jsonb_build_object('old', v_old_value, 'new', p_fee));
-
-    RETURN jsonb_build_object('success', TRUE, 'fee', p_fee);
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.set_emergency_fee(NUMERIC) TO authenticated;
-
--- -----------------------------------------------------------------------
--- 5.  RPC: admin_update_category
--- -----------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_update_category(
-    p_category_id   UUID,
-    p_name          TEXT     DEFAULT NULL,
-    p_base_price    NUMERIC  DEFAULT NULL,
-    p_image_url     TEXT     DEFAULT NULL,
-    p_active        BOOLEAN  DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-BEGIN
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'admin' THEN
-        RAISE EXCEPTION 'admin_update_category: permission denied';
-    END IF;
-
-    UPDATE public.service_categories SET
-        name       = COALESCE(p_name,       name),
-        base_price = COALESCE(p_base_price, base_price),
-        image_url  = COALESCE(p_image_url,  image_url),
-        active     = COALESCE(p_active,     active),
-        updated_at = now()
-    WHERE id = p_category_id;
-
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Category not found: %', p_category_id;
-    END IF;
-
-    INSERT INTO public.audit_log (table_name, record_id, operation, actor_id, changes)
-    VALUES ('service_categories', p_category_id, 'admin_update_category', auth.uid(),
-        jsonb_build_object('name', p_name, 'base_price', p_base_price, 'image_url', p_image_url, 'active', p_active));
-
-    RETURN jsonb_build_object('success', TRUE, 'category_id', p_category_id);
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.admin_update_category(UUID, TEXT, NUMERIC, TEXT, BOOLEAN) TO authenticated;
-
--- -----------------------------------------------------------------------
--- 6.  RPC: admin_fetch_users  (combined customer + provider view)
--- -----------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_fetch_users()
-RETURNS TABLE (
-    user_id         UUID,
-    name            TEXT,
-    email           TEXT,
-    phone           TEXT,
-    role            TEXT,
-    status          TEXT,
-    created_at      TIMESTAMPTZ,
-    -- provider extras (NULL for plain customers)
-    provider_profile_id  UUID,
-    provider_type        TEXT,
-    provider_status      TEXT,
-    coins                BIGINT,
-    rating_avg           NUMERIC,
-    review_count         INT,
-    bid_banned_until     TIMESTAMPTZ,
-    verified_id_hash     TEXT
-)
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT
-        p.id            AS user_id,
-        p.name,
-        au.email,
-        p.phone,
-        p.role,
-        p.status,
-        p.created_at,
-        pp.id           AS provider_profile_id,
-        pp.provider_type,
-        pp.status       AS provider_status,
-        COALESCE((SELECT SUM(cl.amount) FROM coin_ledger cl WHERE cl.provider_profile_id = pp.id), 0) AS coins,
-        pp.rating_avg,
-        pp.review_count,
-        pp.bid_banned_until,
-        pp.verified_id_hash
-    FROM public.profiles p
-    LEFT JOIN auth.users au ON au.id = p.id
-    LEFT JOIN public.provider_profiles pp ON pp.user_id = p.id AND pp.status != 'left'
-    WHERE (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
-    ORDER BY p.created_at DESC;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.admin_fetch_users() TO authenticated;
-
--- -----------------------------------------------------------------------
--- 7.  RPC: admin_fetch_coin_ledger
--- -----------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_fetch_coin_ledger(p_provider_profile_id UUID)
-RETURNS TABLE (
-    id          UUID,
-    amount      INT,
-    reason      TEXT,
-    reference_id UUID,
-    created_at  TIMESTAMPTZ
-)
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT cl.id, cl.amount, cl.reason, cl.reference_id, cl.created_at
-    FROM public.coin_ledger cl
-    WHERE cl.provider_profile_id = p_provider_profile_id
-      AND (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin'
-    ORDER BY cl.created_at DESC;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.admin_fetch_coin_ledger(UUID) TO authenticated;
-
--- -----------------------------------------------------------------------
--- 8.  Dispute chat table (admin ↔ parties)
--- -----------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.dispute_messages (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    dispute_id  UUID NOT NULL REFERENCES public.disputes(id) ON DELETE CASCADE,
-    sender_id   UUID NOT NULL REFERENCES public.profiles(id),
-    content     TEXT NOT NULL,
-    image_url   TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE POLICY verification_requests_admin_read
+ON public.verification_requests
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.profiles AS p
+        WHERE p.id = auth.uid()
+          AND p.role = 'admin'
+    )
 );
 
-ALTER TABLE public.dispute_messages ENABLE ROW LEVEL SECURITY;
+-- =========================================================
+-- 7. REVENUE BY PERIOD
+-- Revenue is derived from completed bookings and paid emergency
+-- fees, if those tables and columns are available.
+-- =========================================================
 
--- Admin can do anything; parties can read and insert on their own dispute
-CREATE POLICY disp_msg_admin ON public.dispute_messages
-    FOR ALL TO authenticated
-    USING ((SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin');
-
-CREATE POLICY disp_msg_read ON public.dispute_messages
-    FOR SELECT TO authenticated
-    USING (
-        dispute_id IN (
-            SELECT id FROM public.disputes
-            WHERE raised_by = auth.uid()
-               OR request_id IN (
-                   SELECT request_id FROM public.bookings b
-                   JOIN public.provider_profiles pp ON pp.id = b.provider_profile_id
-                   WHERE pp.user_id = auth.uid()
-               )
-        )
+CREATE OR REPLACE FUNCTION public.admin_is_authorized()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.profiles AS p
+        WHERE p.id = auth.uid()
+          AND p.role = 'admin'
     );
+$function$;
 
-CREATE POLICY disp_msg_insert ON public.dispute_messages
-    FOR INSERT TO authenticated
-    WITH CHECK (sender_id = auth.uid());
+REVOKE ALL ON FUNCTION public.admin_is_authorized() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_is_authorized()
+TO authenticated;
 
--- Enable Realtime on dispute_messages
-ALTER PUBLICATION supabase_realtime ADD TABLE public.dispute_messages;
-
--- -----------------------------------------------------------------------
--- 9.  RPC: admin_approve_verification
--- -----------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_approve_verification(p_request_id UUID)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-    v_req verification_requests%ROWTYPE;
-BEGIN
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'admin' THEN
-        RAISE EXCEPTION 'admin_approve_verification: permission denied';
-    END IF;
-
-    SELECT * INTO v_req FROM public.verification_requests WHERE id = p_request_id FOR UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Verification request not found: %', p_request_id; END IF;
-
-    UPDATE public.verification_requests SET
-        status      = 'approved',
-        reviewer_id = auth.uid(),
-        reviewed_at = now()
-    WHERE id = p_request_id;
-
-    -- Mark field on provider_profile
-    IF v_req.doc_type = 'id_proof' THEN
-        UPDATE public.provider_profiles SET id_proof_url = v_req.document_url, updated_at = now()
-        WHERE id = v_req.provider_profile_id;
-    ELSIF v_req.doc_type = 'selfie' THEN
-        UPDATE public.provider_profiles SET photo_url = v_req.document_url, updated_at = now()
-        WHERE id = v_req.provider_profile_id;
-    END IF;
-
-    INSERT INTO public.audit_log (table_name, record_id, operation, actor_id, changes)
-    VALUES ('verification_requests', p_request_id, 'admin_approve_verification', auth.uid(),
-        jsonb_build_object('doc_type', v_req.doc_type));
-
-    RETURN jsonb_build_object('success', TRUE, 'doc_type', v_req.doc_type);
-END;
-$$;
-
-GRANT EXECUTE ON FUNCTION public.admin_approve_verification(UUID) TO authenticated;
-
--- -----------------------------------------------------------------------
--- 10. RPC: admin_reject_verification
--- -----------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.admin_reject_verification(
-    p_request_id UUID,
-    p_reason     TEXT DEFAULT 'Document could not be verified'
+-- A function is used instead of assuming a particular booking
+-- price/payment column exists. The result always has a stable shape.
+CREATE OR REPLACE FUNCTION public.revenue_by_period(period text DEFAULT 'day')
+RETURNS TABLE (
+    period_start date,
+    revenue numeric,
+    transaction_count bigint,
+    is_demo boolean
 )
-RETURNS JSONB
 LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
-SET search_path = public
-AS $$
+SET search_path = ''
+AS $function$
+DECLARE
+    v_period text := lower(COALESCE(period, 'day'));
 BEGIN
-    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'admin' THEN
-        RAISE EXCEPTION 'admin_reject_verification: permission denied';
+    IF NOT public.admin_is_authorized() THEN
+        RAISE EXCEPTION 'Admin access required'
+            USING ERRCODE = '42501';
     END IF;
 
-    UPDATE public.verification_requests SET
-        status        = 'rejected',
-        reviewer_id   = auth.uid(),
-        reviewer_note = p_reason,
-        reviewed_at   = now()
-    WHERE id = p_request_id;
+    IF v_period NOT IN ('day', 'week', 'month') THEN
+        RAISE EXCEPTION 'Invalid period. Use day, week, or month.';
+    END IF;
 
-    IF NOT FOUND THEN RAISE EXCEPTION 'Verification request not found: %', p_request_id; END IF;
+    /*
+      Emergency-fee payments are the explicitly recorded paid
+      monetary transactions. Avoid inventing revenue from bookings
+      whose payment amounts are not stored in a known schema.
 
-    RETURN jsonb_build_object('success', TRUE, 'reason', p_reason);
+      Dynamic SQL checks optional columns/tables before using them,
+      so this migration remains compatible with existing schemas.
+    */
+    IF to_regclass('public.emergency_fee_payments') IS NOT NULL THEN
+        RETURN QUERY EXECUTE format(
+            $sql$
+            SELECT
+                date_trunc(%L, e.created_at)::date AS period_start,
+                COALESCE(SUM(e.amount), 0)::numeric AS revenue,
+                COUNT(*)::bigint AS transaction_count,
+                COALESCE(e.is_demo, false) AS is_demo
+            FROM public.emergency_fee_payments e
+            WHERE lower(COALESCE(e.status, '')) IN
+                ('paid', 'completed', 'success', 'succeeded')
+              AND (
+                    NOT COALESCE(e.is_demo, false)
+                    OR COALESCE(
+                        (
+                            SELECT (s.value ->> 'enabled')::boolean
+                            FROM public.settings s
+                            WHERE s.key = 'demo_data_enabled'
+                        ),
+                        true
+                    )
+              )
+            GROUP BY 1, 4
+            ORDER BY 1
+            $sql$,
+            v_period
+        );
+    END IF;
+
+    RETURN;
 END;
-$$;
+$function$;
 
-GRANT EXECUTE ON FUNCTION public.admin_reject_verification(UUID, TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.revenue_by_period(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.revenue_by_period(text)
+TO authenticated;
 
--- -----------------------------------------------------------------------
--- 11. Add image_url to service_categories if missing
--- -----------------------------------------------------------------------
-DO $$
+-- =========================================================
+-- 8. ADMIN USER FETCH RPC
+-- Returns a JSON array to keep the response shape stable.
+-- =========================================================
+
+CREATE OR REPLACE FUNCTION public.admin_fetch_users()
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+    v_result jsonb;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'service_categories' AND column_name = 'image_url'
-    ) THEN
-        ALTER TABLE public.service_categories ADD COLUMN image_url TEXT;
+    IF NOT public.admin_is_authorized() THEN
+        RAISE EXCEPTION 'Admin access required'
+            USING ERRCODE = '42501';
     END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'service_categories' AND column_name = 'updated_at'
-    ) THEN
-        ALTER TABLE public.service_categories ADD COLUMN updated_at TIMESTAMPTZ DEFAULT now();
-    END IF;
+
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'id', p.id,
+                'name', p.name,
+                'email', u.email,
+                'phone', p.phone,
+                'role', p.role,
+                'status', p.status,
+                'is_demo', COALESCE(p.is_demo, false),
+                'created_at', p.created_at
+            )
+            ORDER BY p.created_at DESC
+        ),
+        '[]'::jsonb
+    )
+    INTO v_result
+    FROM public.profiles AS p
+    LEFT JOIN auth.users AS u ON u.id = p.id
+    WHERE public.demo_visible(COALESCE(p.is_demo, false));
+
+    RETURN v_result;
 END;
-$$;
+$function$;
+
+REVOKE ALL ON FUNCTION public.admin_fetch_users() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.admin_fetch_users()
+TO authenticated;
+
+-- =========================================================
+-- 9. SETTINGS ACCESS
+-- Do not grant direct client writes to demo controls.
+-- =========================================================
+
+REVOKE ALL ON public.settings FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.settings TO authenticated;
+
+DROP POLICY IF EXISTS settings_admin_read ON public.settings;
+
+CREATE POLICY settings_admin_read
+ON public.settings
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.profiles AS p
+        WHERE p.id = auth.uid()
+          AND p.role = 'admin'
+    )
+);
+
+-- Audit records are admin-readable; writes happen through trusted
+-- server-side functions or privileged backend operations.
+REVOKE ALL ON public.audit_log FROM PUBLIC, anon, authenticated;
+
+DROP POLICY IF EXISTS audit_log_admin_read ON public.audit_log;
+
+CREATE POLICY audit_log_admin_read
+ON public.audit_log
+FOR SELECT
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1
+        FROM public.profiles AS p
+        WHERE p.id = auth.uid()
+          AND p.role = 'admin'
+    )
+);
+
+GRANT SELECT ON public.audit_log TO authenticated;
+
+COMMIT;

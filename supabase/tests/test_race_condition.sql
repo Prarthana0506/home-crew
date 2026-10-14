@@ -3,7 +3,7 @@
 -- Verifies that two providers racing to accept the same ordinary job:
 -- 1. Exactly one winner succeeds (success: true, creates 2h hold)
 -- 2. The loser of the race receives error: 'already taken'
--- 3. The 8-hour gap rule prevents overlapping/conflicting assignments
+-- 3. The 4-hour gap rule prevents overlapping/conflicting assignments
 -- ============================================================================
 
 BEGIN;
